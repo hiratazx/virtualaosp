@@ -6,6 +6,8 @@ add_library(container_core SHARED
     presenter.cpp
     interp_patcher.cpp
     guest_launcher.cpp
+    display_renderer.cpp
+    input_consumer.cpp
 )
 
 target_link_libraries(container_core PRIVATE

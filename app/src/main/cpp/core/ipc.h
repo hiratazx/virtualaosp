@@ -70,6 +70,10 @@ private:
     Impl* impl_ = nullptr;
 };
 
+/* Process-wide server instance shared by subsystems (JNI glue,
+ * input consumer). Created lazily on first Start(). */
+IpcServer& GlobalIpcServer();
+
 } // namespace accore
 
 #endif /* IPC_H */

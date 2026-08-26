@@ -47,11 +47,6 @@ public:
     }
 };
 
-accore::IpcServer& Ipc() {
-    static accore::IpcServer server;
-    return server;
-}
-
 } // namespace
 
 extern "C" {
@@ -111,25 +106,25 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcStart(
         JNIEnv* env, jobject /*thiz*/, jstring socket_path) {
     std::string path = ToStd(env, socket_path);
     if (path.empty()) return JNI_FALSE;
-    int rc = Ipc().Start(path, std::make_shared<LoggingIpcHandler>());
+    int rc = accore::GlobalIpcServer().Start(path, std::make_shared<LoggingIpcHandler>());
     return rc == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcStop(
         JNIEnv* /*env*/, jobject /*thiz*/) {
-    Ipc().Stop();
+    accore::GlobalIpcServer().Stop();
 }
 
 JNIEXPORT jint JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcBroadcast(
         JNIEnv* env, jobject /*thiz*/, jint type, jbyteArray payload) {
     if (payload == nullptr) {
-        return static_cast<jint>(Ipc().Broadcast(static_cast<uint16_t>(type), nullptr, 0));
+        return static_cast<jint>(accore::GlobalIpcServer().Broadcast(static_cast<uint16_t>(type), nullptr, 0));
     }
     jsize len = env->GetArrayLength(payload);
     jbyte* bytes = env->GetByteArrayElements(payload, nullptr);
-    jint delivered = static_cast<jint>(Ipc().Broadcast(
+    jint delivered = static_cast<jint>(accore::GlobalIpcServer().Broadcast(
         static_cast<uint16_t>(type),
         reinterpret_cast<const uint8_t*>(bytes), static_cast<uint32_t>(len)));
     env->ReleaseByteArrayElements(payload, bytes, JNI_ABORT);

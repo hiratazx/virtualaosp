@@ -265,6 +265,11 @@ size_t IpcServer::Broadcast(uint16_t type, const uint8_t* data, uint32_t len) {
     return delivered;
 }
 
+IpcServer& GlobalIpcServer() {
+    static IpcServer instance;
+    return instance;
+}
+
 size_t IpcServer::client_count() const {
     Impl* impl = impl_;
     if (impl == nullptr) return 0;
