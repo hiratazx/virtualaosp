@@ -25,24 +25,36 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
     std::lock_guard<std::mutex> lock(mMutex);
     if (mState == ContainerState::RUNNING || mState == ContainerState::STARTING) return false;
 
-    // ---- Resolve binary path in the parent (async-signal-safe checks
-    //      cannot run reliably in the child before execve). ----
     const std::string& root = config.rootfsPath;
     const std::string& rel  = config.initBinaryPath;
 
-    // Strip any leading '/' so we never get double-slashes.
+    // ---- Resolve the container's dynamic linker ----
+    // We invoke linker64 directly so the kernel never needs to resolve
+    // PT_INTERP against the host filesystem — linker64 handles it all
+    // in userspace using the container lib paths.
+    std::string linkerPath = root + "/system/bin/linker64";
+    if (access(linkerPath.c_str(), X_OK) != 0) {
+        linkerPath = root + "/bin/linker64";
+        if (access(linkerPath.c_str(), X_OK) != 0) {
+            GL_LOGE("linker64 not found under %s", root.c_str());
+            mState = ContainerState::STOPPED;
+            return false;
+        }
+    }
+    chmod(linkerPath.c_str(), 0755);
+
+    // ---- Resolve the guest entry-point binary (existence only — linker
+    //      does the actual loading, not the kernel). ----
     std::string binaryPath = root + "/" +
         ((!rel.empty() && rel.front() == '/') ? rel.substr(1) : rel);
 
-    // Fallback chain: requested binary → /system/bin/sh → /bin/sh
-    if (access(binaryPath.c_str(), X_OK) != 0) {
-        GL_LOGE("target binary not executable: %s (errno %d: %s) — trying fallbacks",
-                binaryPath.c_str(), errno, strerror(errno));
+    if (access(binaryPath.c_str(), F_OK) != 0) {
+        GL_LOGE("target binary missing: %s — trying fallbacks", binaryPath.c_str());
         const char* fallbacks[] = {"/system/bin/sh", "/bin/sh", nullptr};
         bool found = false;
         for (int i = 0; fallbacks[i]; ++i) {
             std::string fb = root + fallbacks[i];
-            if (access(fb.c_str(), X_OK) == 0) {
+            if (access(fb.c_str(), F_OK) == 0) {
                 GL_LOGI("falling back to %s", fb.c_str());
                 binaryPath = fb;
                 found = true;
@@ -50,19 +62,15 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
             }
         }
         if (!found) {
-            GL_LOGE("no executable guest binary found under %s", root.c_str());
+            GL_LOGE("no guest binary found under %s", root.c_str());
             mState = ContainerState::STOPPED;
             return false;
         }
     }
+    chmod(binaryPath.c_str(), 0755);
 
-    // Repair execute bit if missing (common on freshly extracted tar archives).
-    if (chmod(binaryPath.c_str(), 0755) != 0) {
-        GL_LOGI("chmod 0755 failed for %s: %s (continuing)",
-                binaryPath.c_str(), strerror(errno));
-    }
-
-    GL_LOGI("launching guest: %s", binaryPath.c_str());
+    GL_LOGI("linker:  %s", linkerPath.c_str());
+    GL_LOGI("binary:  %s", binaryPath.c_str());
 
     mState = ContainerState::STARTING;
     pid_t pid = fork();
@@ -76,12 +84,12 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
         chdir(root.c_str());
 
         std::vector<std::string> envStrings = {
-            "LD_PRELOAD="    + config.libfakePath,
+            "LD_PRELOAD="       + config.libfakePath,
             "LD_LIBRARY_PATH=" + root + "/system/lib64:"
                                + root + "/system/lib:"
                                + root + "/apex/com.android.runtime/lib64",
             "AOSP_ROOTFS_DIR=" + root,
-            "PATH=/system/bin:/system/xbin:/bin:/apex/com.android.runtime/bin",
+            "PATH="            + root + "/system/bin:" + root + "/bin",
             "ANDROID_ROOT=/system",
             "ANDROID_DATA=/data",
         };
@@ -89,12 +97,18 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
         for (const auto& s : envStrings) envp.push_back(const_cast<char*>(s.c_str()));
         envp.push_back(nullptr);
 
-        char* const argv[] = { const_cast<char*>(binaryPath.c_str()), nullptr };
-        execve(binaryPath.c_str(), argv, envp.data());
-        // If we reach here execve failed; log then exit so the parent's
-        // waitpid sees a non-zero status and the monitor fires CRASHED.
+        /* argv[0] = linker64 path (its own identity), argv[1] = ELF to load.
+         * linker64 resolves PT_INTERP and shared libs inside the container,
+         * so the kernel never looks up the interpreter on the host root. */
+        char* const argv[] = {
+            const_cast<char*>(linkerPath.c_str()),
+            const_cast<char*>(binaryPath.c_str()),
+            nullptr
+        };
+
+        execve(linkerPath.c_str(), argv, envp.data());
         __android_log_print(ANDROID_LOG_ERROR, GL_TAG,
-            "guest execve failed: %s — %s", binaryPath.c_str(), strerror(errno));
+            "execve via linker64 failed: %s — %s", linkerPath.c_str(), strerror(errno));
         _exit(127);
     }
 
@@ -102,7 +116,7 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
     mState = ContainerState::RUNNING;
     if (mMonitorThread.joinable()) mMonitorThread.join();
     mMonitorThread = std::thread(&GuestLauncher::monitorLoop, this, pid);
-    GL_LOGI("guest started pid=%d", pid);
+    GL_LOGI("guest started pid=%d via linker64", pid);
     return true;
 }
 

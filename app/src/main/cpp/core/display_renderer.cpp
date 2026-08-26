@@ -291,26 +291,25 @@ void DisplayRenderer::renderLoop() {
     while (mRunning) {
         {
             std::unique_lock<std::mutex> lock(mWindowMutex);
-            mCondition.wait(lock, [this]() { return (!mRunning) || (mWindow != nullptr); });
+            /* Wait until the window is available AND any previous EGL context
+             * has been fully torn down, so we never init on a stale display. */
+            mCondition.wait(lock, [this]() {
+                return !mRunning ||
+                       (mWindow != nullptr && mEglDisplay == EGL_NO_DISPLAY);
+            });
 
             if (!mRunning) break;
 
-            if (!eglReady && mWindow) {
+            if (!eglReady && mWindow != nullptr) {
                 if (initEGL()) {
                     setupGL();
                     eglReady = true;
                     LOGI("EGL successfully initialized on viewport thread");
                 } else {
-                    /* Back off briefly so a transient surface error cannot
-                     * spin the loop at full speed. */
-                    lock.unlock();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    terminateEGL();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;
                 }
-            } else if (eglReady && !mWindow) {
-                terminateEGL();
-                eglReady = false;
-                continue;
             }
         }
 
@@ -369,35 +368,22 @@ void DisplayRenderer::renderLoop() {
                 glActiveTexture(GL_TEXTURE0);
                 glBindTexture(GL_TEXTURE_2D, mTextureId);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            } else if (diagnosticFallbackEnabled()) {
-                // Animated standby: sinusoidal brightness pulse (period ~2s)
-                // sweeps between #0A0A14 and #1E1E30 so the screen visibly
-                // indicates the EGL surface is alive while waiting for the
-                // first guest frame.
-                auto now = std::chrono::steady_clock::now();
-                double t = std::chrono::duration<double>(
-                    now.time_since_epoch()).count();
-                float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(t * 3.14159));
-                float r = 0.039f + pulse * 0.078f;  /* 0A -> 1E */
-                float g = 0.039f + pulse * 0.078f;
-                float b = 0.078f + pulse * 0.118f;  /* 14 -> 30 */
-                glClearColor(r, g, b, 1.0f);
+            } else {
+                /* Diagnostic standby: dark background while waiting for
+                 * the first guest frame. */
+                glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
             }
 
             if (!eglSwapBuffers(mEglDisplay, mEglSurface)) {
                 EGLint err = eglGetError();
-                if (err == EGL_BAD_SURFACE || err == EGL_BAD_NATIVE_WINDOW) {
-                    /* Surface was abandoned (e.g. SurfaceHolder destroyed).
-                     * Clean up EGL so we stop spamming logcat and wait for
-                     * a new window to be provided. */
-                    LOGE("eglSwapBuffers: surface lost (0x%x) — stopping render", err);
+                LOGE("eglSwapBuffers failed with error 0x%x", err);
+                if (err == EGL_BAD_SURFACE ||
+                    err == EGL_BAD_DISPLAY ||
+                    err == EGL_BAD_NATIVE_WINDOW) {
+                    std::unique_lock<std::mutex> lock(mWindowMutex);
                     terminateEGL();
                     eglReady = false;
-                    std::unique_lock<std::mutex> lock(mWindowMutex);
-                    mCondition.wait(lock, [this]() { return !mRunning || mWindow != nullptr; });
-                } else {
-                    LOGE("eglSwapBuffers error 0x%x", err);
                 }
             }
 
@@ -408,6 +394,7 @@ void DisplayRenderer::renderLoop() {
     }
 
     if (eglReady) {
+        std::unique_lock<std::mutex> lock(mWindowMutex);
         terminateEGL();
     }
 }
