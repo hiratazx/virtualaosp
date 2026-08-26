@@ -70,4 +70,5 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     implementation(libs.xz)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.gson)
 }
