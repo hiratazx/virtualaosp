@@ -10,6 +10,7 @@
 #include "fake_state.h"
 #include "path_redirect.h"
 #include "uid_spoof.h"
+#include "vfs_emu.h"
 #include "log.h"
 
 #include <dirent.h>
@@ -83,6 +84,10 @@ inline int fail_enametoolong() {
 
 AC_EXPORT int open(const char* pathname, int flags, ...) {
     static void* s_real;
+    if (enabled() && is_virtual_fs_path(pathname)) {
+        int vfd = emu_open(pathname);
+        if (vfd != -2) return vfd;
+    }
     Translated t(pathname);
     if (t.overflowed()) return fail_enametoolong();
     if (flags & O_CREAT) {
@@ -153,6 +158,14 @@ AC_EXPORT int creat(const char* pathname, mode_t mode) {
 
 AC_EXPORT FILE* fopen(const char* path, const char* mode) {
     static void* s_real;
+    if (enabled() && is_virtual_fs_path(path)) {
+        int vfd = emu_open(path);
+        if (vfd != -2) {
+            if (vfd < 0) return nullptr; /* errno set by emu layer */
+            using FdFn = FILE* (*)(int, const char*);
+            return reinterpret_cast<FdFn>(next_sym(&s_real, "fdopen"))(vfd, mode);
+        }
+    }
     Translated t(path);
     if (t.overflowed()) {
         errno = ENAMETOOLONG;
@@ -179,6 +192,10 @@ AC_EXPORT FILE* fopen64(const char* path, const char* mode) {
 
 AC_EXPORT int stat(const char* path, struct stat* st) {
     static void* s_real;
+    if (st != nullptr && enabled() && is_virtual_fs_path(path)) {
+        int vr = emu_stat(path, st);
+        if (vr != -2) return vr;
+    }
     Translated t(path);
     if (t.overflowed()) return fail_enametoolong();
     using Fn = int (*)(const char*, struct stat*);
@@ -226,6 +243,13 @@ extern "C" AC_EXPORT int fstatat64(int d, const char* p, struct stat64* st, int 
 
 AC_EXPORT int access(const char* path, int mode) {
     static void* s_real;
+    if (enabled() && is_virtual_fs_path(path)) {
+        int err = 0;
+        if (emu_access(path, mode, &err)) {
+            if (err != 0) { errno = err; return -1; }
+            return 0;
+        }
+    }
     Translated t(path);
     if (t.overflowed()) return fail_enametoolong();
     using Fn = int (*)(const char*, int);
@@ -246,6 +270,13 @@ AC_EXPORT int faccessat(int dirfd, const char* path, int mode, int flags) {
 
 AC_EXPORT ssize_t readlink(const char* path, char* buf, size_t size) {
     static void* s_real;
+    if (buf != nullptr && enabled() && is_virtual_fs_path(path)) {
+        ssize_t vlen = -1;
+        if (emu_readlink(path, buf, size, &vlen)) {
+            if (vlen < 0) return -1;
+            return vlen;
+        }
+    }
     Translated t(path);
     if (t.overflowed()) return static_cast<ssize_t>(fail_enametoolong());
     using Fn = ssize_t (*)(const char*, char*, size_t);
@@ -270,6 +301,11 @@ AC_EXPORT ssize_t readlinkat(int dirfd, const char* path, char* buf, size_t size
 
 AC_EXPORT DIR* opendir(const char* name) {
     static void* s_real;
+    bool handled = false;
+    if (enabled()) {
+        DIR* vd = emu_opendir(name, &handled);
+        if (handled) return vd;
+    }
     Translated t(name);
     if (t.overflowed()) {
         errno = ENAMETOOLONG;

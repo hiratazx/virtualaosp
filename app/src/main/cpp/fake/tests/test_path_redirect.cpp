@@ -76,6 +76,27 @@ int main() {
     acfake::set_state(false, NULL, 5, 5);
     expect_map("/system/x", NULL);
 
+    /* 9. Reverse mapping (unmap_path). */
+    acfake::set_state(true, ROOTFS, 0, 0);
+    {
+        char out[512];
+        CHECK(acfake::unmap_path(ROOTFS "/system/lib/libc.so", out, sizeof(out)));
+        CHECK(strcmp(out, "/system/lib/libc.so") == 0);
+
+        CHECK(acfake::unmap_path(ROOTFS, out, sizeof(out)));
+        CHECK(strcmp(out, "/") == 0);
+
+        CHECK(!acfake::unmap_path("/elsewhere/file", out, sizeof(out)));
+        CHECK(!acfake::unmap_path(ROOTFS "XX/not-under-root", out, sizeof(out)));
+
+        /* round-trip: map -> unmap == identity */
+        char mapped[512], restored[512];
+        CHECK(acfake::map_path("/data/app/foo.apk", mapped, sizeof(mapped)) ==
+              acfake::MapResult::Mapped);
+        CHECK(acfake::unmap_path(mapped, restored, sizeof(restored)));
+        CHECK(strcmp(restored, "/data/app/foo.apk") == 0);
+    }
+
     if (g_failures == 0) {
         printf("ALL TESTS PASSED\n");
         return 0;

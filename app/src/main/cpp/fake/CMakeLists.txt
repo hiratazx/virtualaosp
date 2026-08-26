@@ -2,9 +2,11 @@ add_library(fake SHARED
     fake.cpp
     fake_state.cpp
     path_redirect.cpp
+    real_libc.cpp
     syscall_hooks_read.cpp
     syscall_hooks_write.cpp
     uid_spoof.cpp
+    vfs_emu.cpp
 )
 
 target_link_libraries(fake PRIVATE

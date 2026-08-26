@@ -108,4 +108,21 @@ MapResult map_path(const char* path, char* out, size_t out_size) {
     return MapResult::Mapped;
 }
 
+bool unmap_path(const char* path, char* out, size_t out_size) {
+    if (!starts_with_rootfs(path)) {
+        return false;
+    }
+    const size_t rlen = rootfs_len();
+    const char* suffix = path + rlen;
+    if (*suffix == '\0') {
+        suffix = "/"; /* sandbox root itself maps back to "/" */
+    }
+    const size_t slen = strlen(suffix);
+    if (slen + 1 > out_size) {
+        return false;
+    }
+    memcpy(out, suffix, slen + 1);
+    return true;
+}
+
 } // namespace acfake

@@ -24,6 +24,12 @@ enum class MapResult {
 MapResult map_path(const char* path, char* out, size_t out_size);
 
 /*
+ * Reverse translation: when `path` lies under the sandbox root, writes the
+ * guest view ("/system/..." style) into out[] and returns true.
+ */
+bool unmap_path(const char* path, char* out, size_t out_size);
+
+/*
  * True when `path` belongs to a virtual filesystem emulated in userspace
  * (/proc, /sys). Such paths must NOT be redirected to the sandbox; the
  * vfs emulation layer owns them.
