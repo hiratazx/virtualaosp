@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 #define GL_TAG "ac.guest"
 #define GL_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  GL_TAG, __VA_ARGS__)
@@ -20,6 +21,23 @@
 
 static std::atomic<bool>  g_pumpRunning{false};
 static std::thread        g_framePumpThread;
+static std::thread        g_logPipeThread;
+
+/* Resolve the first path in candidates that exists under rootfs.
+ * Also chmods it to 0755 so execve never fails with EPERM. */
+static std::string resolveRootfsPath(
+        const std::string& root,
+        std::initializer_list<const char*> candidates) {
+    for (const char* rel : candidates) {
+        std::string full = root + "/" +
+            (*rel == '/' ? rel + 1 : rel);  /* strip leading slash */
+        if (access(full.c_str(), F_OK) == 0) {
+            chmod(full.c_str(), 0755);
+            return full;
+        }
+    }
+    return {};
+}
 
 /**
  * Push animated RGBA test frames directly into DisplayRenderer at ~60 fps.
@@ -85,50 +103,49 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
     const std::string& rel  = config.initBinaryPath;
 
     // ---- Resolve the container's dynamic linker ----
-    // We invoke linker64 directly so the kernel never needs to resolve
-    // PT_INTERP against the host filesystem — linker64 handles it all
-    // in userspace using the container lib paths.
-    std::string linkerPath = root + "/system/bin/linker64";
-    if (access(linkerPath.c_str(), X_OK) != 0) {
-        linkerPath = root + "/bin/linker64";
-        if (access(linkerPath.c_str(), X_OK) != 0) {
-            GL_LOGE("linker64 not found under %s", root.c_str());
-            mState = ContainerState::STOPPED;
-            return false;
-        }
+    // Check /bin/ first (flattened GSI rootfs), then /system/bin/.
+    std::string linkerPath = resolveRootfsPath(root, {
+        "bin/linker64",
+        "system/bin/linker64",
+    });
+    if (linkerPath.empty()) {
+        GL_LOGE("linker64 not found under %s", root.c_str());
+        mState = ContainerState::STOPPED;
+        return false;
     }
-    chmod(linkerPath.c_str(), 0755);
 
-    // ---- Resolve the guest entry-point binary (existence only — linker
-    //      does the actual loading, not the kernel). ----
-    std::string binaryPath = root + "/" +
-        ((!rel.empty() && rel.front() == '/') ? rel.substr(1) : rel);
-
-    if (access(binaryPath.c_str(), F_OK) != 0) {
-        GL_LOGE("target binary missing: %s — trying fallbacks", binaryPath.c_str());
-        const char* fallbacks[] = {"/system/bin/sh", "/bin/sh", nullptr};
-        bool found = false;
-        for (int i = 0; fallbacks[i]; ++i) {
-            std::string fb = root + fallbacks[i];
-            if (access(fb.c_str(), F_OK) == 0) {
-                GL_LOGI("falling back to %s", fb.c_str());
-                binaryPath = fb;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            GL_LOGE("no guest binary found under %s", root.c_str());
-            mState = ContainerState::STOPPED;
-            return false;
-        }
+    // ---- Resolve the guest entry-point binary ----
+    // Check /bin/ first (flattened layout), then /system/bin/.
+    std::string binaryPath;
+    if (!rel.empty()) {
+        binaryPath = resolveRootfsPath(root, {rel.c_str()});
     }
-    chmod(binaryPath.c_str(), 0755);
+    if (binaryPath.empty()) {
+        binaryPath = resolveRootfsPath(root, {
+            "bin/sh",
+            "system/bin/sh",
+        });
+    }
+    if (binaryPath.empty()) {
+        GL_LOGE("no guest binary found under %s", root.c_str());
+        mState = ContainerState::STOPPED;
+        return false;
+    }
 
     GL_LOGI("linker:  %s", linkerPath.c_str());
     GL_LOGI("binary:  %s", binaryPath.c_str());
 
     mState = ContainerState::STARTING;
+
+    /* Create a pipe so the child's stdout+stderr are captured to logcat.
+     * The child writes to logPipe[1]; the parent reads from logPipe[0]. */
+    int logPipe[2] = {-1, -1};
+    if (pipe(logPipe) != 0) {
+        GL_LOGE("pipe() failed: %s", strerror(errno));
+        mState = ContainerState::STOPPED;
+        return false;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         mState = ContainerState::STOPPED;
@@ -136,28 +153,33 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
     }
 
     if (pid == 0) {
+        /* ---- child ---- */
         setpgid(0, 0);
         chdir(root.c_str());
 
-        /* Redirect stdin to /dev/null so the child never blocks waiting
-         * for terminal input. linker64 on some AOSP images reads fd 0
-         * during early init, which hangs if it is an open TTY. */
-        int devNull = open("/dev/null", O_RDWR);
-        if (devNull >= 0) {
-            dup2(devNull, STDIN_FILENO);
-            close(devNull);
-        }
+        /* Redirect stdin to /dev/null; stdout+stderr go to the log pipe. */
+        int devNull = open("/dev/null", O_RDONLY);
+        if (devNull >= 0) { dup2(devNull, STDIN_FILENO);  close(devNull); }
+        dup2(logPipe[1], STDOUT_FILENO);
+        dup2(logPipe[1], STDERR_FILENO);
+        /* Close all inherited fds above stderr. */
+        for (int fd = 3; fd < 256; ++fd) close(fd);
 
         std::vector<std::string> envStrings = {
             "LD_PRELOAD="       + config.libfakePath,
-            "LD_LIBRARY_PATH=" + root + "/system/lib64:"
+            /* lib64/lib before system/lib64 — flattened rootfs first. */
+            "LD_LIBRARY_PATH=" + root + "/lib64:"
+                               + root + "/lib:"
+                               + root + "/system/lib64:"
                                + root + "/system/lib:"
                                + root + "/apex/com.android.runtime/lib64",
             "AOSP_ROOTFS_DIR=" + root,
-            "PATH="            + root + "/system/bin:" + root + "/bin",
+            /* /bin before /system/bin — flattened rootfs first. */
+            "PATH="            + root + "/bin:" + root + "/system/bin:/system/bin",
             /* Bionic uses ANDROID_ROOT to locate property files and
-             * runtime resources — must point inside the container. */
-            "ANDROID_ROOT="    + root + "/system",
+             * runtime resources — point to the container root itself
+             * so it works with both flattened and /system layouts. */
+            "ANDROID_ROOT="    + root,
             "ANDROID_DATA="    + root + "/data",
             "TMPDIR="          + root + "/data/local/tmp",
         };
@@ -180,6 +202,34 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
             linkerPath.c_str(), errno, strerror(errno));
         _exit(127);
     }
+
+    /* ---- parent ---- */
+    /* Close the write end — only the child writes to it. */
+    close(logPipe[1]);
+
+    /* Spawn a reader thread that streams the child's output to logcat. */
+    if (g_logPipeThread.joinable()) g_logPipeThread.join();
+    int readFd = logPipe[0];
+    g_logPipeThread = std::thread([readFd]() {
+        char buf[256];
+        std::string line;
+        ssize_t n;
+        while ((n = ::read(readFd, buf, sizeof(buf) - 1)) > 0) {
+            buf[n] = '\0';
+            for (ssize_t i = 0; i < n; ++i) {
+                if (buf[i] == '\n') {
+                    if (!line.empty()) {
+                        GL_LOGI("[guest] %s", line.c_str());
+                        line.clear();
+                    }
+                } else if (buf[i] != '\r') {
+                    line += buf[i];
+                }
+            }
+        }
+        if (!line.empty()) GL_LOGI("[guest] %s", line.c_str());
+        ::close(readFd);
+    });
 
     mGuestPid = pid;
     mFrameFd  = config.frameFd;
