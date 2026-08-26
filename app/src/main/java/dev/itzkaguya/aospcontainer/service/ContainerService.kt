@@ -105,8 +105,7 @@ class ContainerService : Service() {
 
     /** Local binder exposing the live service to the viewport UI. */
     inner class ContainerBinder : Binder() {
-        val service: ContainerService
-            get() = this@ContainerService
+        fun getService(): ContainerService = this@ContainerService
     }
 
     override fun onBind(intent: Intent?): IBinder = ContainerBinder()
