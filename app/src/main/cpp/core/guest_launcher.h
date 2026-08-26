@@ -13,6 +13,12 @@ struct LaunchConfig {
     std::string rootfsPath;
     std::string libfakePath;
     std::string initBinaryPath;
+    /* Optional shared-memory frame channel fd from ContainerCore.
+     * -1 disables the software frame pump. */
+    int frameFd{-1};
+    int frameWidth{720};
+    int frameHeight{1280};
+    int frameSlots{4};
 };
 
 using StateCallback = std::function<void(ContainerState, int)>;
@@ -28,6 +34,7 @@ private:
     GuestLauncher() = default;
     void monitorLoop(pid_t pid);
     pid_t mGuestPid{-1};
+    int   mFrameFd{-1};
     std::atomic<ContainerState> mState{ContainerState::STOPPED};
     std::thread mMonitorThread;
     StateCallback mStateCallback;

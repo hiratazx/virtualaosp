@@ -1,16 +1,96 @@
 #include "guest_launcher.h"
+#include "display_renderer.h"
 #include <android/log.h>
 #include <cerrno>
+#include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 #define GL_TAG "ac.guest"
 #define GL_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  GL_TAG, __VA_ARGS__)
 #define GL_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, GL_TAG, __VA_ARGS__)
+
+/* ---- Software frame pump -------------------------------------------- */
+
+static std::atomic<bool>  g_pumpRunning{false};
+static std::thread        g_framePumpThread;
+
+/**
+ * Generate and push RGBA test frames directly into DisplayRenderer at
+ * ~60 fps. Runs while the real guest compositor is still initialising so
+ * the EGL/GL/Surface pipeline can be verified end-to-end immediately.
+ *
+ * frameFd: memfd shared with the guest (mmap'd to keep the fd alive).
+ * If frameFd < 0, the pump still runs but skips the mmap.
+ */
+static void startSoftwareFramePump(int frameFd, int width, int height, int slotCount) {
+    g_pumpRunning.store(true, std::memory_order_relaxed);
+
+    const size_t slotSize  = static_cast<size_t>(width * height * 4);
+    const size_t totalSize = slotSize * static_cast<size_t>(slotCount);
+
+    /* Map the shared frame channel fd if available so it stays valid for
+     * the guest process.  We don't write through it here — updateGuestFrame
+     * feeds the renderer directly — but holding a mapping prevents premature
+     * fd cleanup. */
+    void* shm = MAP_FAILED;
+    if (frameFd >= 0 && totalSize > 0) {
+        shm = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_SHARED, frameFd, 0);
+        if (shm == MAP_FAILED) {
+            GL_LOGE("mmap frameFd failed: %s (continuing without shm)", strerror(errno));
+        }
+    }
+
+    g_framePumpThread = std::thread(
+        [shm, totalSize, width, height, slotSize]() {
+
+        std::vector<uint8_t> pixelBuf(slotSize);
+        uint32_t tick = 0;
+
+        while (g_pumpRunning.load(std::memory_order_relaxed)) {
+            uint8_t* buf = pixelBuf.data();
+
+            for (int y = 0; y < height; ++y) {
+                for (int x = 0; x < width; ++x) {
+                    size_t idx = static_cast<size_t>(y * width + x) * 4;
+                    buf[idx + 0] = static_cast<uint8_t>((x + tick)       % 256);
+                    buf[idx + 1] = static_cast<uint8_t>((y + tick * 2)   % 256);
+                    buf[idx + 2] = static_cast<uint8_t>(
+                        128 + 127 * std::sin((x + y + tick) * 0.05f));
+                    buf[idx + 3] = 255;
+                }
+            }
+
+            accore::DisplayRenderer::getInstance().updateGuestFrame(buf, width, height);
+
+            tick += 2;
+            std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 fps
+        }
+
+        if (shm != MAP_FAILED && totalSize > 0) {
+            munmap(shm, totalSize);
+        }
+    });
+
+    GL_LOGI("software frame pump started (%dx%d)", width, height);
+}
+
+static void stopSoftwareFramePump() {
+    g_pumpRunning.store(false, std::memory_order_relaxed);
+    if (g_framePumpThread.joinable()) {
+        g_framePumpThread.join();
+    }
+    GL_LOGI("software frame pump stopped");
+}
+
+/* -------------------------------------------------------------------- */
 
 GuestLauncher& GuestLauncher::getInstance() {
     static GuestLauncher instance;
@@ -127,10 +207,22 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
     }
 
     mGuestPid = pid;
+    mFrameFd  = config.frameFd;
     mState = ContainerState::RUNNING;
     if (mMonitorThread.joinable()) mMonitorThread.join();
     mMonitorThread = std::thread(&GuestLauncher::monitorLoop, this, pid);
     GL_LOGI("guest started pid=%d via linker64", pid);
+
+    /* Start the software frame pump so the EGL/GL pipeline is exercised
+     * immediately, before the guest compositor outputs real frames. */
+    if (config.frameFd >= 0) {
+        startSoftwareFramePump(
+            config.frameFd, config.frameWidth, config.frameHeight, config.frameSlots);
+    } else {
+        /* No frameFd — pump without shm (still pushes test frames). */
+        startSoftwareFramePump(-1, config.frameWidth, config.frameHeight, config.frameSlots);
+    }
+
     return true;
 }
 
@@ -155,6 +247,7 @@ void GuestLauncher::monitorLoop(pid_t pid) {
 }
 
 bool GuestLauncher::stopContainer(int signal, int timeoutMs) {
+    stopSoftwareFramePump();
     std::lock_guard<std::mutex> lock(mMutex);
     if (mGuestPid <= 0) return false;
     kill(-mGuestPid, signal);
