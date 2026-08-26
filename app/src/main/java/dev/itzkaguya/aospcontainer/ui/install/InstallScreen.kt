@@ -194,6 +194,23 @@ fun InstallScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text("Replace / Reinstall ROM")
                                 }
+
+                                // Destructive: wipe guest /data only
+                                TextButton(
+                                    onClick = { viewModel.wipeData() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Default.DeleteSweep,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Wipe /data",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                         }
                     }

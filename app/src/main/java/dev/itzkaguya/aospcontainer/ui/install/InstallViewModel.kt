@@ -82,4 +82,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     fun resetToInstall() {
         _uiState.value = RomUiState.NotInstalled
     }
+
+    /** Clears guest user data while keeping the system rootfs intact. */
+    fun wipeData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            File(rootfsDir, "data").deleteRecursively()
+            checkInstalledRom()
+        }
+    }
 }
