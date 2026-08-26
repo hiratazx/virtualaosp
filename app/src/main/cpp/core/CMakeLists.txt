@@ -3,6 +3,7 @@ add_library(container_core SHARED
     launcher.cpp
     ipc.cpp
     frame_channel.cpp
+    presenter.cpp
 )
 
 target_link_libraries(container_core PRIVATE

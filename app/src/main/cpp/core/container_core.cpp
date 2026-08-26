@@ -7,7 +7,11 @@
 #include "launcher.h"
 #include "ipc.h"
 #include "log.h"
+#include "frame_channel.h"
+#include "presenter.h"
 
+#include <android/native_window_jni.h>
+#include <cerrno>
 #include <jni.h>
 #include <cstdint>
 #include <cstring>
@@ -129,5 +133,43 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcBroadcast(
         reinterpret_cast<const uint8_t*>(bytes), static_cast<uint32_t>(len)));
     env->ReleaseByteArrayElements(payload, bytes, JNI_ABORT);
     return delivered;
+}
+
+/* ------------------------------------------------------------------ */
+/* frame channel + presentation                                        */
+/* ------------------------------------------------------------------ */
+
+JNIEXPORT jint JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeCreateFrameChannel(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint width, jint height, jint slots) {
+    auto ch = accore::FrameChannelHost::Create(static_cast<uint32_t>(width),
+                                               static_cast<uint32_t>(height),
+                                               static_cast<uint32_t>(slots));
+    if (ch == nullptr) return -EINVAL;
+    accore::SetHostChannel(std::move(ch));
+    return accore::HostChannel()->fd(); /* owned by the singleton; fd stays open */
+}
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeCloseFrameChannel(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    accore::FramePresenter::Detach();
+    accore::SetHostChannel(nullptr);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePresenterAttachSurface(
+        JNIEnv* env, jobject /*thiz*/, jobject surface) {
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (window == nullptr) return JNI_FALSE;
+    int rc = accore::FramePresenter::Attach(window);
+    ANativeWindow_release(window); /* presenter holds its own ref */
+    return rc == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePresenterDetach(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    accore::FramePresenter::Detach();
 }
 }

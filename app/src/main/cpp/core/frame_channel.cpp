@@ -77,6 +77,20 @@ std::unique_ptr<FrameChannelHost> FrameChannelHost::Create(uint32_t width,
     return channel;
 }
 
+namespace {
+
+std::unique_ptr<FrameChannelHost> g_host_channel;
+
+} // namespace
+
+FrameChannelHost* HostChannel() {
+    return g_host_channel.get();
+}
+
+void SetHostChannel(std::unique_ptr<FrameChannelHost> channel) {
+    g_host_channel = std::move(channel);
+}
+
 bool FrameChannelHost::ReadLatest(uint8_t* dst, size_t dst_len, Snapshot* out) {
     const AcFrameRegionHeader* h = header_;
     if (h == nullptr || h->magic != AC_FRAME_MAGIC) return false;

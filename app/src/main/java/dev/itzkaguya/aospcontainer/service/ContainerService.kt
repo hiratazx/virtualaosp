@@ -81,6 +81,11 @@ class ContainerService : Service() {
 
         ContainerCore.nativeIpcStart(socketPath)
 
+        /* Default guest resolution; configurable per-instance in Phase 5. */
+        val frameFd = ContainerCore.nativeCreateFrameChannel(
+            DEFAULT_WIDTH, DEFAULT_HEIGHT, FRAME_SLOTS,
+        )
+
         val pid = ContainerCore.nativeStartContainer(
             rootfsDir = rootfs,
             nativeLibDir = applicationInfo.nativeLibraryDir,
@@ -89,13 +94,15 @@ class ContainerService : Service() {
             excludePaths = "",
             fakeUid = 0,
             fakeGid = 0,
+            frameFd = frameFd,
             enableSeccomp = false,
         )
         if (pid > 0) {
             guestPid = pid
-            Log.i(TAG, "container started pid=$pid rootfs=$rootfs")
+            Log.i(TAG, "container started pid=$pid rootfs=$rootfs frameFd=$frameFd")
         } else {
             Log.e(TAG, "container failed to start: errno=$pid")
+            ContainerCore.nativeCloseFrameChannel()
             ContainerCore.nativeIpcStop()
         }
     }
@@ -105,6 +112,8 @@ class ContainerService : Service() {
             ContainerCore.nativeStopContainer(guestPid, GRACE_MS)
             guestPid = 0
         }
+        ContainerCore.nativePresenterDetach()
+        ContainerCore.nativeCloseFrameChannel()
         ContainerCore.nativeIpcStop()
     }
 
@@ -192,6 +201,9 @@ class ContainerService : Service() {
         private const val GRACE_MS = 2_000
         private const val KEY_MONITOR_PHANTOM_PROCS =
             "settings_enable_monitor_phantom_procs"
+        private const val DEFAULT_WIDTH = 720
+        private const val DEFAULT_HEIGHT = 1280
+        private const val FRAME_SLOTS = 4
 
         const val ACTION_START = "dev.itzkaguya.aospcontainer.action.START"
         const val ACTION_STOP = "dev.itzkaguya.aospcontainer.action.STOP"

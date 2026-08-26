@@ -53,4 +53,17 @@ object ContainerCore {
     /** Send a packet of [type] to every connected guest client.
      * Returns the number of clients it was delivered to. */
     external fun nativeIpcBroadcast(type: Int, payload: ByteArray?): Int
+
+    /** Create the shared frame region; returns its fd for passing into
+     * [nativeStartContainer], or a negative -errno. */
+    external fun nativeCreateFrameChannel(width: Int, height: Int, slots: Int): Int
+
+    /** Tear down presenter + channel singleton. */
+    external fun nativeCloseFrameChannel()
+
+    /** Start presenting frames from the channel onto [surface]. */
+    external fun nativePresenterAttachSurface(surface: android.view.Surface): Boolean
+
+    /** Stop the presentation loop and release the surface reference. */
+    external fun nativePresenterDetach()
 }

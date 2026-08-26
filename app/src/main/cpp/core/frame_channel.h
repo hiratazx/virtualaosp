@@ -49,6 +49,11 @@ private:
     AcFrameRegionHeader* header_ = nullptr;
 };
 
+/* Process-wide channel singleton backing the presenter. The raw fd of
+ * whatever instance is stored here gets handed into the guest env. */
+FrameChannelHost* HostChannel();
+void SetHostChannel(std::unique_ptr<FrameChannelHost> channel);
+
 } // namespace accore
 
 #endif /* FRAME_CHANNEL_H */
