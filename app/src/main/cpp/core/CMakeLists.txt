@@ -8,6 +8,7 @@ add_library(container_core SHARED
     guest_launcher.cpp
     display_renderer.cpp
     input_consumer.cpp
+    native_bridge.cpp
 )
 
 target_link_libraries(container_core PRIVATE

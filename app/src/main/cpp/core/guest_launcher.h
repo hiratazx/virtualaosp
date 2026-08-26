@@ -23,6 +23,7 @@ public:
     bool startContainer(const LaunchConfig& config);
     bool stopContainer(int signal = 15, int timeoutMs = 2000);
     void setStateCallback(StateCallback callback);
+    ContainerState state() const { return mState.load(std::memory_order_relaxed); }
 private:
     GuestLauncher() = default;
     void monitorLoop(pid_t pid);
