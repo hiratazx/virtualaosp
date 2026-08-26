@@ -5,6 +5,13 @@ package dev.itzkaguya.aospcontainer.core
  */
 object ContainerCore {
 
+    /** Container lifecycle states mirrored from the native launcher. */
+    const val STATE_IDLE: Int = 0
+    const val STATE_STARTING: Int = 1
+    const val STATE_RUNNING: Int = 2
+    const val STATE_STOPPING: Int = 3
+    const val STATE_EXITED: Int = 4
+
     init {
         System.loadLibrary("container_core")
     }
@@ -14,4 +21,25 @@ object ContainerCore {
 
     /** Liveness probe for the native library. */
     external fun nativePing(): Boolean
+
+    /**
+     * Fork+exec one guest process with libfake.so injected via LD_PRELOAD.
+     * Returns the guest pid (>0), or a negative -errno on failure.
+     */
+    external fun nativeStartContainer(
+        rootfsDir: String,
+        nativeLibDir: String,
+        initPath: String,
+        extraMounts: String,
+        excludePaths: String,
+        fakeUid: Int,
+        fakeGid: Int,
+        enableSeccomp: Boolean,
+    ): Int
+
+    /** SIGTERM the guest process group; escalate to SIGKILL after [graceMs]. */
+    external fun nativeStopContainer(pid: Int, graceMs: Int): Boolean
+
+    /** One of the STATE_* constants. */
+    external fun nativeGetState(): Int
 }

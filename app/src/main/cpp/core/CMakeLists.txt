@@ -1,5 +1,6 @@
 add_library(container_core SHARED
     container_core.cpp
+    launcher.cpp
 )
 
 target_link_libraries(container_core PRIVATE
