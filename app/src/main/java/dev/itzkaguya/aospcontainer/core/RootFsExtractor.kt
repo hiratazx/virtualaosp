@@ -24,13 +24,17 @@ sealed class ExtractionState {
 }
 
 class RootFsExtractor(private val context: Context) {
+
     private val gson = Gson()
 
     fun extractRootFs(
         inputStream: InputStream,
         targetDir: File = File(context.filesDir, "rootfs")
     ): Flow<ExtractionState> = flow {
-        if (!targetDir.exists()) targetDir.mkdirs()
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
         var manifest: ContainerManifest? = null
 
         try {
@@ -42,63 +46,98 @@ class RootFsExtractor(private val context: Context) {
 
                         while (entry != null) {
                             val destFile = File(targetDir, entry.name)
-                            if (!destFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
-                                throw SecurityException("Directory traversal in archive: ${entry.name}")
+
+                            // Prevent Zip-Slip directory traversal
+                            val canonicalDest = destFile.canonicalPath
+                            if (!canonicalDest.startsWith(targetDir.canonicalPath)) {
+                                throw SecurityException("Archive entry attempted directory traversal: ${entry.name}")
                             }
 
-                            // Flattened APEX archives (e.g.
-                            // com.android.ondevicepersonalization/) often
-                            // carry directory entries whose typeflag is not
-                            // LF_DIR but whose name ends in '/'; some also
-                            // collide with directories created implicitly by
-                            // earlier parents. Detect all three shapes and
-                            // never open a FileOutputStream on a directory,
-                            // which surfaces as EISDIR.
-                            val isDirectory = entry.isDirectory ||
-                                entry.name.endsWith("/") ||
-                                entry.linkFlag == TarConstants.LF_DIR ||
-                                destFile.isDirectory
+                            val isDir = entry.isDirectory ||
+                                    entry.name.endsWith("/") ||
+                                    entry.linkFlag == TarConstants.LF_DIR
 
-                            if (isDirectory) {
+                            if (isDir) {
                                 destFile.mkdirs()
                                 NativeFileUtils.setPosixPermissions(destFile, entry.mode)
                             } else if (entry.isSymbolicLink) {
+                                destFile.parentFile?.mkdirs()
                                 NativeFileUtils.createSymlink(entry.linkName, destFile.absolutePath)
                             } else {
-                                destFile.parentFile?.mkdirs()
-                                FileOutputStream(destFile).use { out ->
-                                    tarIn.copyTo(out, 64 * 1024)
-                                }
-                                NativeFileUtils.setPosixPermissions(destFile, entry.mode)
-                                if (destFile.name == "manifest.json" && destFile.parentFile == targetDir) {
-                                    manifest = gson.fromJson(destFile.readText(), ContainerManifest::class.java)
+                                if (destFile.exists() && destFile.isDirectory) {
+                                    NativeFileUtils.setPosixPermissions(destFile, entry.mode)
+                                } else {
+                                    destFile.parentFile?.mkdirs()
+                                    FileOutputStream(destFile).use { out ->
+                                        tarIn.copyTo(out, bufferSize = 64 * 1024)
+                                    }
+                                    NativeFileUtils.setPosixPermissions(destFile, entry.mode)
+
+                                    if (destFile.name == "manifest.json" && destFile.parentFile == targetDir) {
+                                        val jsonContent = destFile.readText()
+                                        manifest = gson.fromJson(jsonContent, ContainerManifest::class.java)
+                                    }
                                 }
                             }
+
                             extractedCount++
-                            if (extractedCount % 20 == 0) emit(ExtractionState.Progress(-1, entry.name))
+                            if (extractedCount % 25 == 0) {
+                                emit(ExtractionState.Progress(-1, entry.name))
+                            }
+
                             entry = tarIn.nextTarEntry
                         }
                     }
                 }
             }
-            emit(ExtractionState.Completed(targetDir, manifest ?: verifyFallback(targetDir)))
-        } catch (t: Throwable) {
-            emit(ExtractionState.Error(t))
+
+            // Post-extraction verification and manifest standardization
+            val finalManifest = manifest?.let { parsed ->
+                if (parsed.id.isNullOrBlank()) {
+                    parsed.copy(id = "aosp_container_guest")
+                } else {
+                    parsed
+                }
+            } ?: verifyAndGenerateFallbackManifest(targetDir)
+
+            emit(ExtractionState.Completed(targetDir, finalManifest))
+
+        } catch (e: Throwable) {
+            emit(ExtractionState.Error(e))
         }
     }.flowOn(Dispatchers.IO)
 
-    private fun verifyFallback(dir: File): ContainerManifest {
-        if (!File(dir, "system").exists() && !File(dir, "bin").exists()) {
-            throw IllegalStateException("Invalid RootFS structure: missing /system and /bin")
+    private fun verifyAndGenerateFallbackManifest(rootFsDir: File): ContainerManifest {
+        val possibleInitBinaries = listOf(
+            File(rootFsDir, "init"),
+            File(rootFsDir, "system/bin/init"),
+            File(rootFsDir, "bin/init"),
+            File(rootFsDir, "system/bin/sh"),
+            File(rootFsDir, "bin/sh")
+        )
+
+        val hasValidEntrypoint = possibleInitBinaries.any { it.exists() || isSymlink(it) }
+
+        if (!hasValidEntrypoint) {
+            throw IllegalStateException("Invalid RootFS: missing init or sh entrypoint binary")
         }
+
         return ContainerManifest(
-            id = "aosp_container_fallback",
-            name = "AOSP RootFS",
-            flavor = null,
-            version = "1.0",
+            id = "aosp_container_guest",
+            name = "Generic AOSP RootFS",
+            version = "1.0.0",
             arch = "arm64-v8a",
             androidApi = 34,
-            minAppVersion = 1,
+            minAppVersion = 1
         )
+    }
+
+    private fun isSymlink(file: File): Boolean {
+        return try {
+            val stat = android.system.Os.lstat(file.absolutePath)
+            android.system.OsConstants.S_ISLNK(stat.st_mode)
+        } catch (e: Exception) {
+            false
+        }
     }
 }
