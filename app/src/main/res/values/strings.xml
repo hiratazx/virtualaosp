@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AOSP Container</string>
+    <string name="notification_channel_name">Container runtime</string>
+    <string name="notification_title">AOSP Container active</string>
+    <string name="notification_state_fmt">Runtime: %1$s</string>
+    <string name="state_idle">idle</string>
+    <string name="state_starting">starting</string>
+    <string name="state_running">running</string>
+    <string name="state_stopping">stopping</string>
+    <string name="engine_version_fmt">Engine %1$s</string>
+    <string name="start_container">Start container</string>
+    <string name="stop_container">Stop container</string>
 </resources>
