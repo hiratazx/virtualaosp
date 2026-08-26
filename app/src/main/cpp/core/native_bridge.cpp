@@ -114,16 +114,15 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeAttachSurface(
     ANativeWindow* window =
         surface != nullptr ? ANativeWindow_fromSurface(env, surface) : nullptr;
     if (window == nullptr) return JNI_FALSE;
-    jboolean ok = accore::DisplayRenderer::getInstance().attach(window) ? JNI_TRUE
-                                                                        : JNI_FALSE;
+    accore::DisplayRenderer::getInstance().setNativeWindow(window);
     ANativeWindow_release(window); /* renderer keeps its own reference */
-    return ok;
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeDetachSurface(
         JNIEnv* /*env*/, jobject /*thiz*/) {
-    accore::DisplayRenderer::getInstance().detach();
+    accore::DisplayRenderer::getInstance().destroyWindow();
 }
 
 extern "C" JNIEXPORT jint JNICALL

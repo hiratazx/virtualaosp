@@ -3,7 +3,6 @@ add_library(container_core SHARED
     launcher.cpp
     ipc.cpp
     frame_channel.cpp
-    presenter.cpp
     interp_patcher.cpp
     guest_launcher.cpp
     display_renderer.cpp
@@ -15,6 +14,8 @@ target_link_libraries(container_core PRIVATE
     container_common
     log
     android
+    EGL
+    GLESv3
 )
 
 target_compile_options(container_core PRIVATE

@@ -9,7 +9,7 @@
 #include "ipc.h"
 #include "log.h"
 #include "frame_channel.h"
-#include "presenter.h"
+#include "display_renderer.h"
 
 #include <android/native_window_jni.h>
 #include <cerrno>
@@ -149,7 +149,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeCreateFrameChannel(
 JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeCloseFrameChannel(
         JNIEnv* /*env*/, jobject /*thiz*/) {
-    accore::FramePresenter::Detach();
+    accore::DisplayRenderer::getInstance().destroyWindow();
     accore::SetHostChannel(nullptr);
 }
 
@@ -158,15 +158,15 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePresenterAttachSurface
         JNIEnv* env, jobject /*thiz*/, jobject surface) {
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
     if (window == nullptr) return JNI_FALSE;
-    int rc = accore::FramePresenter::Attach(window);
-    ANativeWindow_release(window); /* presenter holds its own ref */
-    return rc == 0 ? JNI_TRUE : JNI_FALSE;
+    accore::DisplayRenderer::getInstance().setNativeWindow(window);
+    ANativeWindow_release(window); /* renderer holds its own reference */
+    return JNI_TRUE;
 }
 
 JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePresenterDetach(
         JNIEnv* /*env*/, jobject /*thiz*/) {
-    accore::FramePresenter::Detach();
+    accore::DisplayRenderer::getInstance().destroyWindow();
 }
 
 /* ------------------------------------------------------------------ */

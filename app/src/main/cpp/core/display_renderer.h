@@ -1,18 +1,13 @@
-/*
- * Display rendering facade.
- *
- * Owns the guest-facing surface lifecycle: guarantees a shared frame
- * channel exists (creating a default-resolution one on demand) and hands
- * ANativeWindow attachments to the vsync-paced presenter that blits
- * seqlock-stable frames from the channel. GPU/EGL composition can replace
- * the software path behind this same facade later.
- */
-#ifndef DISPLAY_RENDERER_H
-#define DISPLAY_RENDERER_H
+#pragma once
 
-#include <cstdint>
-
-struct ANativeWindow;
+#include <android/native_window.h>
+#include <EGL/egl.h>
+#include <GLES3/gl3.h>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <vector>
 
 namespace accore {
 
@@ -20,32 +15,51 @@ class DisplayRenderer {
 public:
     static DisplayRenderer& getInstance();
 
-    /* Creates the shared frame region explicitly (optional; attach()
-     * falls back to defaults). Returns 0 or -errno. */
-    int createChannel(uint32_t width, uint32_t height, uint32_t slots);
-
-    /* Starts presenting onto `window`; acquires its own reference. */
-    bool attach(ANativeWindow* window);
-
-    /* Stops the presentation loop and releases the window. */
-    void detach();
-
-    bool isAttached() const { return mAttached; }
+    void setNativeWindow(ANativeWindow* window);
+    void updateWindowSize(int width, int height);
+    void destroyWindow();
+    void updateGuestFrame(const uint8_t* rgbaBuffer, int width, int height);
 
 private:
-    DisplayRenderer() = default;
-    bool mAttached = false;
+    DisplayRenderer();
+    ~DisplayRenderer();
+
+    void renderLoop();
+    bool initEGL();
+    void terminateEGL();
+    void setupGL();
+
+    /* Pulls seqlock-stable frames from the shared memfd channel and
+     * pushes them into updateGuestFrame (guest transport unchanged). */
+    void ensurePumpStarted();
+    void pumpLoop();
+
+    ANativeWindow* mWindow{nullptr};
+    std::mutex mWindowMutex;
+    std::condition_variable mCondition;
+
+    std::thread mRenderThread;
+    std::thread mPumpThread;
+    std::atomic<bool> mRunning{false};
+    std::atomic<bool> mHasNewFrame{false};
+    std::atomic<bool> mSizeChanged{false};
+
+    EGLDisplay mEglDisplay{EGL_NO_DISPLAY};
+    EGLSurface mEglSurface{EGL_NO_SURFACE};
+    EGLContext mEglContext{EGL_NO_CONTEXT};
+
+    GLuint mProgram{0};
+    GLuint mTextureId{0};
+    GLuint mVao{0};
+    GLuint mVbo{0};
+
+    int mWidth{1080};
+    int mHeight{2400};
+    int mGuestFrameWidth{1080};
+    int mGuestFrameHeight{2400};
+
+    std::vector<uint8_t> mFrameBuffer;
+    std::mutex mFrameMutex;
 };
 
-/*
- * Diagnostic fallback policy: while no guest frame has ever arrived,
- * the presenter clears the surface with an animated #1E1E24 pulse at
- * ~30 FPS instead of leaving a black screen — proving EGL/ANativeWindow
- * operation end to end. Enabled by default.
- */
-void setDiagnosticFallbackEnabled(bool enabled);
-bool diagnosticFallbackEnabled();
-
 } // namespace accore
-
-#endif /* DISPLAY_RENDERER_H */
