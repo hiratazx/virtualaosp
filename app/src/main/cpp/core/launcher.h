@@ -28,6 +28,8 @@ struct LaunchConfig {
     int fake_uid = 0;
     int fake_gid = 0;
     bool enable_seccomp = false;
+    /* Inherited memfd backing the guest->host frame channel (-1 = none). */
+    int frame_fd = -1;
 };
 
 enum class ContainerState {

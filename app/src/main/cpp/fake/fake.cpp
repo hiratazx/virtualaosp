@@ -10,6 +10,7 @@
  */
 #include "container_common.h"
 #include "fake_state.h"
+#include "frame_producer.h"
 #include "log.h"
 #include "path_redirect.h"
 #include "seccomp_filter.h"
@@ -53,6 +54,8 @@ __attribute__((constructor)) static void ac_fake_init(void) {
     }
 
     acfake::set_excluded_prefixes(getenv(AC_ENV_EXCLUDE));
+
+    acfake::frame_producer_init_from_env();
 
     if (const char* sc = getenv(AC_ENV_SECCOMP); sc != nullptr && sc[0] == '1') {
         acfake::install_seccomp_filter();

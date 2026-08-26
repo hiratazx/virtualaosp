@@ -34,6 +34,7 @@ object ContainerCore {
         excludePaths: String,
         fakeUid: Int,
         fakeGid: Int,
+        frameFd: Int,
         enableSeccomp: Boolean,
     ): Int
 

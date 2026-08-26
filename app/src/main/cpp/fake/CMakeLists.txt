@@ -7,6 +7,7 @@ add_library(fake SHARED
     syscall_hooks_write.cpp
     uid_spoof.cpp
     vfs_emu.cpp
+    frame_producer.cpp
     mount_emu.cpp
     seccomp_filter.cpp
 )

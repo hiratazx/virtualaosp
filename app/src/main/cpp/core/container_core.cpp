@@ -68,7 +68,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeStartContainer(
         JNIEnv* env, jobject /*thiz*/,
         jstring rootfs_dir, jstring native_lib_dir, jstring init_path,
         jstring extra_mounts, jstring exclude_paths,
-        jint fake_uid, jint fake_gid, jboolean enable_seccomp) {
+        jint fake_uid, jint fake_gid, jint frame_fd, jboolean enable_seccomp) {
 
     LaunchConfig cfg;
     cfg.rootfs_dir = ToStd(env, rootfs_dir);
@@ -78,6 +78,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeStartContainer(
     cfg.exclude_paths = ToStd(env, exclude_paths);
     cfg.fake_uid = fake_uid;
     cfg.fake_gid = fake_gid;
+    cfg.frame_fd = frame_fd;
     cfg.enable_seccomp = enable_seccomp == JNI_TRUE;
 
     GuestLauncher::SetState(ContainerState::kStarting);

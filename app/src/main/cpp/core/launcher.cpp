@@ -1,5 +1,6 @@
 #include "launcher.h"
 #include "container_common.h"
+#include "frame_protocol.h"
 #include "log.h"
 
 #include <atomic>
@@ -90,6 +91,9 @@ pid_t GuestLauncher::Start(const LaunchConfig& cfg) {
         env.Set(AC_ENV_FAKE_UID, std::to_string(cfg.fake_uid));
         env.Set(AC_ENV_FAKE_GID, std::to_string(cfg.fake_gid));
         if (cfg.enable_seccomp) env.Set(AC_ENV_SECCOMP, "1");
+        if (cfg.frame_fd >= 0) {
+            env.Set(AC_ENV_FRAME_FD, std::to_string(cfg.frame_fd));
+        }
         if (!cfg.extra_mounts.empty()) env.Set(AC_ENV_MOUNTS, cfg.extra_mounts);
         if (!cfg.exclude_paths.empty()) env.Set(AC_ENV_EXCLUDE, cfg.exclude_paths);
         env.Set("LD_PRELOAD", preload);
