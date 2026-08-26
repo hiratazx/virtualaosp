@@ -1,5 +1,6 @@
 #include "path_redirect.h"
 #include "fake_state.h"
+#include "path_resolver_c.h"
 
 #include <string.h>
 
@@ -94,6 +95,19 @@ MapResult map_path(const char* path, char* out, size_t out_size) {
     for (size_t i = 0; i < g_excludes.count; ++i) {
         if (has_prefix(path, g_excludes.entries[i])) {
             return MapResult::Passthrough;
+        }
+    }
+
+    /*
+     * Legacy alias table first (/etc -> <root>/system/etc, /bin ->
+     * <root>/system/bin, ...): guest code referencing FHS-style paths
+     * lands inside the Android tree instead of nonexistent top-level
+     * directories. Only consulted when the engine explicitly initialized
+     * the resolver (host unit tests exercise the generic mapping below).
+     */
+    if (ac_path_resolver_ready()) {
+        if (ac_path_resolver_resolve(path, out, out_size)) {
+            return MapResult::Mapped;
         }
     }
 

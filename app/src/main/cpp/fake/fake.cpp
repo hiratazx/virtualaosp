@@ -13,6 +13,7 @@
 #include "frame_producer.h"
 #include "ipc_client.h"
 #include "log.h"
+#include "path_resolver.h"
 #include "path_redirect.h"
 #include "seccomp_filter.h"
 
@@ -55,6 +56,9 @@ __attribute__((constructor)) static void ac_fake_init(void) {
     }
 
     acfake::set_excluded_prefixes(getenv(AC_ENV_EXCLUDE));
+
+    /* Populate the legacy-path alias table from the active sandbox. */
+    PathResolver::getInstance().init(acfake::rootfs());
 
     acfake::frame_producer_init_from_env();
     acfake::ipc_client_init_from_env();

@@ -1,6 +1,15 @@
 #include "path_resolver.h"
+#include "path_resolver_c.h"
 #include <cstdlib>
 #include <cstring>
+
+bool ac_path_resolver_ready(void) {
+    return PathResolver::getInstance().isReady();
+}
+
+bool ac_path_resolver_resolve(const char* path, char* out, size_t out_size) {
+    return PathResolver::getInstance().resolvePath(path, out, out_size);
+}
 
 PathResolver& PathResolver::getInstance() {
     static PathResolver instance;
