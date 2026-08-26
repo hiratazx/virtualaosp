@@ -2,6 +2,7 @@ add_library(fake SHARED
     fake.cpp
     fake_state.cpp
     path_redirect.cpp
+    path_resolver.cpp
     real_libc.cpp
     syscall_hooks_read.cpp
     syscall_hooks_write.cpp
