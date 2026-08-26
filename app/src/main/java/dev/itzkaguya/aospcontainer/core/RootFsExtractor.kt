@@ -91,6 +91,14 @@ class RootFsExtractor(private val context: Context) {
         if (!File(dir, "system").exists() && !File(dir, "bin").exists()) {
             throw IllegalStateException("Invalid RootFS structure: missing /system and /bin")
         }
-        return ContainerManifest("AOSP RootFS", null, "1.0", "arm64-v8a", 34, 1)
+        return ContainerManifest(
+            id = "aosp_container_fallback",
+            name = "AOSP RootFS",
+            flavor = null,
+            version = "1.0",
+            arch = "arm64-v8a",
+            androidApi = 34,
+            minAppVersion = 1,
+        )
     }
 }
