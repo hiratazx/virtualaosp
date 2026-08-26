@@ -27,8 +27,7 @@ static std::thread        g_framePumpThread;
  * exercised immediately, before the guest compositor outputs real frames.
  */
 static void startSoftwareFramePump(int width, int height) {
-    if (g_pumpRunning.load(std::memory_order_relaxed)) return;
-    g_pumpRunning.store(true, std::memory_order_relaxed);
+    if (g_pumpRunning.exchange(true)) return;  // already running
 
     g_framePumpThread = std::thread([width, height]() {
         GL_LOGI("software frame feeder started at %dx%d", width, height);
@@ -58,9 +57,10 @@ static void startSoftwareFramePump(int width, int height) {
 }
 
 static void stopSoftwareFramePump() {
-    g_pumpRunning.store(false, std::memory_order_relaxed);
-    if (g_framePumpThread.joinable()) {
-        g_framePumpThread.join();
+    if (g_pumpRunning.exchange(false)) {  // returns old value; join only if was running
+        if (g_framePumpThread.joinable()) {
+            g_framePumpThread.join();
+        }
     }
     GL_LOGI("software frame pump stopped");
 }

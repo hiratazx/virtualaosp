@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -56,6 +57,7 @@ import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +95,11 @@ fun ContainerViewportScreen(
     var showPowerDialog by remember { mutableStateOf(false) }
     var showConsole by remember { mutableStateOf(true) }
     val consoleLogs = remember { mutableStateListOf<String>() }
+
+    // Collect live container state from the bound service
+    val containerState by (containerService?.containerState
+        ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()
+    val isContainerRunning = containerState == ContainerNativeBridge.STATE_RUNNING
 
     LaunchedEffect(Unit) {
         consoleLogs.add("[Engine] Initializing container runtime...")
@@ -282,7 +289,48 @@ fun ContainerViewportScreen(
             )
         }
 
-        // 5. Power Actions Modal Dialog
+        // 6. Startup Loading Overlay — visible until STATE_RUNNING
+        if (!isContainerRunning) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.72f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF00E676),
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(52.dp)
+                    )
+                    Text(
+                        text = when (containerState) {
+                            ContainerNativeBridge.STATE_STARTING -> "Starting container…"
+                            ContainerNativeBridge.STATE_RUNNING  -> "Running"
+                            ContainerNativeBridge.STATE_CRASHED  -> "Container crashed"
+                            ContainerNativeBridge.STATE_TERMINATED -> "Terminated"
+                            else -> "Waiting for container…"
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    if (rootfsPath != null) {
+                        Text(
+                            text = rootfsPath.substringAfterLast("/"),
+                            color = Color(0xFF90A4AE),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        // 7. Power Actions Modal Dialog
         if (showPowerDialog) {
             AlertDialog(
                 onDismissRequest = { showPowerDialog = false },

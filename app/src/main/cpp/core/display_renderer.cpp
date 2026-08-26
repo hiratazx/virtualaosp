@@ -93,6 +93,7 @@ void DisplayRenderer::ensurePumpStarted() {
 }
 
 void DisplayRenderer::updateGuestFrame(const uint8_t* rgbaBuffer, int width, int height) {
+    if (!rgbaBuffer || width <= 0 || height <= 0) return;
     {
         std::unique_lock<std::mutex> lock(mFrameMutex);
         mGuestFrameWidth  = width;
