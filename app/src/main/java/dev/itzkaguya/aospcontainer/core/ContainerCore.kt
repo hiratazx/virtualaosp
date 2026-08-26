@@ -66,4 +66,11 @@ object ContainerCore {
 
     /** Stop the presentation loop and release the surface reference. */
     external fun nativePresenterDetach()
+
+    /** Read a guest ELF's PT_INTERP ("" when absent/invalid). */
+    external fun nativeReadInterp(elfPath: String): String
+
+    /** Overwrite PT_INTERP in place; 0 on success, negative -errno
+     * (-ENOSPC when the replacement exceeds the existing segment). */
+    external fun nativePatchInterp(elfPath: String, newInterp: String): Int
 }

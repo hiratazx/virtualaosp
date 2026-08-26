@@ -5,6 +5,7 @@
  * their own translation units.
  */
 #include "launcher.h"
+#include "interp_patcher.h"
 #include "ipc.h"
 #include "log.h"
 #include "frame_channel.h"
@@ -171,5 +172,28 @@ JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePresenterDetach(
         JNIEnv* /*env*/, jobject /*thiz*/) {
     accore::FramePresenter::Detach();
+}
+
+/* ------------------------------------------------------------------ */
+/* rootfs import helpers                                               */
+/* ------------------------------------------------------------------ */
+
+JNIEXPORT jstring JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeReadInterp(
+        JNIEnv* env, jobject /*thiz*/, jstring elf_path) {
+    std::string path = ToStd(env, elf_path);
+    std::string interp;
+    int rc = accore::ReadInterp(path, &interp);
+    if (rc != 0) return env->NewStringUTF("");
+    return env->NewStringUTF(interp.c_str());
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativePatchInterp(
+        JNIEnv* env, jobject /*thiz*/, jstring elf_path, jstring new_interp) {
+    std::string path = ToStd(env, elf_path);
+    std::string interp = ToStd(env, new_interp);
+    if (path.empty() || interp.empty()) return -EINVAL;
+    return accore::PatchInterp(path, interp);
 }
 }

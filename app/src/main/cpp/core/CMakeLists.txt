@@ -4,6 +4,7 @@ add_library(container_core SHARED
     ipc.cpp
     frame_channel.cpp
     presenter.cpp
+    interp_patcher.cpp
 )
 
 target_link_libraries(container_core PRIVATE
