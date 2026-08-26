@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.tar.TarConstants
 import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
 import java.io.File
@@ -45,7 +46,20 @@ class RootFsExtractor(private val context: Context) {
                                 throw SecurityException("Directory traversal in archive: ${entry.name}")
                             }
 
-                            if (entry.isDirectory) {
+                            // Flattened APEX archives (e.g.
+                            // com.android.ondevicepersonalization/) often
+                            // carry directory entries whose typeflag is not
+                            // LF_DIR but whose name ends in '/'; some also
+                            // collide with directories created implicitly by
+                            // earlier parents. Detect all three shapes and
+                            // never open a FileOutputStream on a directory,
+                            // which surfaces as EISDIR.
+                            val isDirectory = entry.isDirectory ||
+                                entry.name.endsWith("/") ||
+                                entry.linkFlag == TarConstants.LF_DIR ||
+                                destFile.isDirectory
+
+                            if (isDirectory) {
                                 destFile.mkdirs()
                                 NativeFileUtils.setPosixPermissions(destFile, entry.mode)
                             } else if (entry.isSymbolicLink) {
