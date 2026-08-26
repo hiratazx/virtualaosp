@@ -51,18 +51,20 @@ object ContainerProcessRunner {
                  * tool lookups resolve to container binaries first. */
                 val shellBinary = "/system/bin/sh"
 
-                ContainerNativeBridge.onGuestLog("[Runner] rootfs: $rootfsPath")
-                ContainerNativeBridge.onGuestLog("[Runner] shell:  $shellBinary (platform bridge)")
+                ContainerNativeBridge.onGuestLog("[Runner] Container rootfs: $rootfsPath")
+                ContainerNativeBridge.onGuestLog("[Runner] Initializing container guest environment...")
 
                 val bootScript = """
-                    echo '[GuestOS] Container shell initialized!'
-                    echo "[GuestOS] uid=$(id -u) gid=$(id -g)"
-                    echo "[GuestOS] kernel=$(uname -r)"
-                    echo '[GuestOS] Working directory:' $(pwd)
+                    echo '[GuestOS] Container shell booted successfully!'
+                    echo '[GuestOS] User: ' $(/system/bin/id)
+                    echo '[GuestOS] Kernel: ' $(/system/bin/uname -a)
+                    echo '[GuestOS] Working directory: ' $(pwd)
                     echo '[GuestOS] RootFS contents:'
-                    ls -la
-                    echo '[GuestOS] Entering standby loop...'
-                    while true; do sleep 5; done
+                    /system/bin/ls -la
+                    echo '[GuestOS] Container ready in standby mode.'
+                    while true; do
+                        /system/bin/sleep 5
+                    done
                 """.trimIndent()
 
                 val pb = ProcessBuilder(shellBinary, "-c", bootScript)
@@ -70,11 +72,10 @@ object ContainerProcessRunner {
                 pb.redirectErrorStream(true)   /* merge stderr into stdout */
 
                 val env = pb.environment()
-                /* Container bin/ takes priority over system so guest tools
-                 * shadow host tools when they exist in the rootfs. */
-                env["PATH"]            = "${rootfsDir.absolutePath}/bin:" +
-                                         "${rootfsDir.absolutePath}/system/bin:" +
-                                         "/system/bin:/system/xbin"
+                /* System bins first — guarantees platform utilities are used
+                 * before any rootfs binaries, preventing W^X SELinux denials. */
+                env["PATH"]            = "/system/bin:/system/xbin:" +
+                                         "${rootfsDir.absolutePath}/bin"
                 env["ANDROID_ROOT"]    = rootfsDir.absolutePath
                 env["ANDROID_DATA"]    = "${rootfsDir.absolutePath}/data"
                 env["TMPDIR"]          = "${rootfsDir.absolutePath}/data/local/tmp"
