@@ -220,22 +220,43 @@ GLuint compileShader(GLenum type, const char* source) {
     return shader;
 }
 
-constexpr const char* kVertexSrc =
-    "attribute vec2 aPos;\n"
-    "attribute vec2 aUV;\n"
-    "varying vec2 vUV;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
-    "    vUV = vec2(aUV.x, 1.0 - aUV.y);\n" /* guest frames are top-down */
-    "}\n";
+/* ES 3.00 vertex shader — layout(location) replaces glGetAttribLocation. */
+constexpr const char* kVertexSrc = R"(#version 300 es
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aTexCoord;
+out vec2 vTexCoord;
+void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y); /* guest frames are top-down */
+}
+)";
 
-constexpr const char* kFragmentSrc =
-    "precision mediump float;\n"
-    "varying vec2 vUV;\n"
-    "uniform sampler2D uTex;\n"
-    "void main() {\n"
-    "    gl_FragColor = texture2D(uTex, vUV);\n"
-    "}\n";
+/* ES 3.00 fragment shader — animated diagnostic canvas while awaiting guest
+ * compositor; textured quad when a guest frame is available. */
+constexpr const char* kFragmentSrc = R"(#version 300 es
+precision mediump float;
+in  vec2 vTexCoord;
+out vec4 fragColor;
+uniform sampler2D uTexture;
+uniform int   uUseTexture;
+uniform float uTime;
+void main() {
+    if (uUseTexture == 1) {
+        fragColor = texture(uTexture, vTexCoord);
+    } else {
+        vec2 uv = vTexCoord;
+        float r = 0.15 + 0.10 * sin(uv.x * 10.0 + uTime * 2.0);
+        float g = 0.20 + 0.15 * sin(uv.y * 10.0 + uTime * 3.0);
+        float b = 0.35 + 0.20 * cos((uv.x + uv.y) * 8.0 + uTime);
+        /* Subtle grid overlay — confirms the container engine is alive. */
+        if (fract(uv.x * 20.0) < 0.03 || fract(uv.y * 20.0) < 0.03) {
+            fragColor = vec4(0.4, 0.6, 0.9, 1.0);
+        } else {
+            fragColor = vec4(r, g, b, 1.0);
+        }
+    }
+}
+)";
 
 } // namespace
 
@@ -258,26 +279,28 @@ void DisplayRenderer::setupGL() {
         return;
     }
 
+    /* Full-screen quad: XY position + UV coords, stride = 4 floats. */
     static const GLfloat quad[] = {
-        -1.f, -1.f, 0.f, 1.f,
-         1.f, -1.f, 1.f, 1.f,
-        -1.f,  1.f, 0.f, 0.f,
-         1.f,  1.f, 1.f, 0.f,
+        -1.f, -1.f,  0.f, 1.f,
+         1.f, -1.f,  1.f, 1.f,
+        -1.f,  1.f,  0.f, 0.f,
+         1.f,  1.f,  1.f, 0.f,
     };
 
-    glGenVertexArrays(1, &mVao); /* GLES3: glGenVertexArrays */
+    glGenVertexArrays(1, &mVao);
     glGenBuffers(1, &mVbo);
     glBindVertexArray(mVao);
     glBindBuffer(GL_ARRAY_BUFFER, mVbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
-    GLint aPos = glGetAttribLocation(mProgram, "aPos");
-    GLint aUV = glGetAttribLocation(mProgram, "aUV");
-    glEnableVertexAttribArray(static_cast<GLuint>(aPos));
-    glVertexAttribPointer(static_cast<GLuint>(aPos), 2, GL_FLOAT, GL_FALSE, 16,
+
+    /* location = 0: vec2 aPosition */
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
                           reinterpret_cast<const void*>(0));
-    glEnableVertexAttribArray(static_cast<GLuint>(aUV));
-    glVertexAttribPointer(static_cast<GLuint>(aUV), 2, GL_FLOAT, GL_FALSE, 16,
-                          reinterpret_cast<const void*>(8));
+    /* location = 1: vec2 aTexCoord */
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          reinterpret_cast<const void*>(2 * sizeof(float)));
     glBindVertexArray(0);
 
     glGenTextures(1, &mTextureId);
@@ -287,29 +310,40 @@ void DisplayRenderer::setupGL() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    LOGI("GL pipeline ready");
+    LOGI("GL pipeline ready (ES3, layout(location) attributes)");
 }
 
 void DisplayRenderer::renderLoop() {
     bool eglReady = false;
+    float timeVal = 0.0f;
+    GLint useTextureLoc = -1;
+    GLint timeLoc = -1;
 
     while (mRunning) {
+        /* ---- Phase 1: wait for a valid window ---- */
         {
             std::unique_lock<std::mutex> lock(mWindowMutex);
-            /* Wait until the window is available AND any previous EGL context
-             * has been fully torn down, so we never init on a stale display. */
-            mCondition.wait(lock, [this]() {
-                return !mRunning ||
-                       (mWindow != nullptr && mEglDisplay == EGL_NO_DISPLAY);
-            });
+            if (mWindow == nullptr || mEglDisplay != EGL_NO_DISPLAY) {
+                /* Either no window yet, or EGL already alive — don't re-init.
+                 * Poll at 50 ms so we respond quickly when the surface arrives
+                 * without burning CPU while idle. */
+                if (mWindow == nullptr) {
+                    mCondition.wait_for(lock, std::chrono::milliseconds(50));
+                    continue;
+                }
+                /* Window present + EGL already up: fall through to render. */
+            }
 
-            if (!mRunning) break;
-
+            /* ---- Phase 2: init EGL (first time or after surface loss) ---- */
             if (!eglReady && mWindow != nullptr) {
                 if (initEGL()) {
                     setupGL();
+                    /* Cache uniform locations after link so we don't call
+                     * glGetUniformLocation every frame. */
+                    useTextureLoc = glGetUniformLocation(mProgram, "uUseTexture");
+                    timeLoc       = glGetUniformLocation(mProgram, "uTime");
                     eglReady = true;
-                    LOGI("EGL successfully initialized on viewport thread");
+                    LOGI("EGL and shaders initialised — entering 60 fps render loop");
                 } else {
                     terminateEGL();
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -318,90 +352,85 @@ void DisplayRenderer::renderLoop() {
             }
         }
 
-        if (eglReady) {
-            int winW, winH, gw, gh;
-            {
-                std::unique_lock<std::mutex> lock(mWindowMutex);
-                winW = mWidth;
-                winH = mHeight;
-            }
-            {
-                std::unique_lock<std::mutex> lock(mFrameMutex);
-                gw = mGuestFrameWidth;
-                gh = mGuestFrameHeight;
-            }
+        if (!eglReady) continue;
 
-            /* Auto-fit letterboxing: preserve the guest aspect ratio
-             * inside the host window (VMware/VirtualBox style). */
-            int vpW = winW, vpH = winH, vpX = 0, vpY = 0;
-            if (gw > 0 && gh > 0 && winW > 0 && winH > 0) {
-                const double guestAR = static_cast<double>(gw) / gh;
-                const double hostAR = static_cast<double>(winW) / winH;
-                if (guestAR > hostAR) {
-                    vpW = winW;
-                    vpH = static_cast<int>(winW / guestAR);
-                } else {
-                    vpH = winH;
-                    vpW = static_cast<int>(winH * guestAR);
-                }
-                vpX = (winW - vpW) / 2;
-                vpY = (winH - vpH) / 2;
-            }
-            glViewport(vpX, vpY, vpW, vpH);
+        /* ---- Phase 3: render one frame ---- */
 
-            bool hasData = false;
-            {
-                std::unique_lock<std::mutex> lock(mFrameMutex);
-                if (mHasNewFrame && !mFrameBuffer.empty()) {
-                    glBindTexture(GL_TEXTURE_2D, mTextureId);
-                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mGuestFrameWidth,
-                                 mGuestFrameHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                                 mFrameBuffer.data());
-                    mHasNewFrame = false;
-                    hasData = true;
-                } else if (!mFrameBuffer.empty()) {
-                    hasData = true;
-                }
-            }
+        /* Letterbox viewport. */
+        int winW, winH, gw, gh;
+        {
+            std::unique_lock<std::mutex> lock(mWindowMutex);
+            winW = mWidth;
+            winH = mHeight;
+        }
+        {
+            std::unique_lock<std::mutex> lock(mFrameMutex);
+            gw = mGuestFrameWidth;
+            gh = mGuestFrameHeight;
+        }
 
-            if (hasData) {
-                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-                glClear(GL_COLOR_BUFFER_BIT);
-
-                glUseProgram(mProgram);
-                glBindVertexArray(mVao);
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, mTextureId);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        int vpW = winW, vpH = winH, vpX = 0, vpY = 0;
+        if (gw > 0 && gh > 0 && winW > 0 && winH > 0) {
+            const double guestAR = static_cast<double>(gw) / gh;
+            const double hostAR  = static_cast<double>(winW) / winH;
+            if (guestAR > hostAR) {
+                vpW = winW;
+                vpH = static_cast<int>(winW / guestAR);
             } else {
-                /* Animated standby: accumulating phase drives three colour
-                 * channels at staggered offsets giving a blue-slate shimmer.
-                 * Distinct enough from a dead black screen at any brightness. */
-                static float phase = 0.0f;
-                phase += 0.03f;
-                float r = 0.08f + 0.04f * std::sin(phase);
-                float g = 0.10f + 0.05f * std::sin(phase + 1.5f);
-                float b = 0.16f + 0.06f * std::sin(phase + 3.0f);
-                glClearColor(r, g, b, 1.0f);
-                glClear(GL_COLOR_BUFFER_BIT);
+                vpH = winH;
+                vpW = static_cast<int>(winH * guestAR);
             }
+            vpX = (winW - vpW) / 2;
+            vpY = (winH - vpH) / 2;
+        }
+        glViewport(vpX, vpY, vpW, vpH);
+        glClear(GL_COLOR_BUFFER_BIT);
 
-            if (!eglSwapBuffers(mEglDisplay, mEglSurface)) {
-                EGLint err = eglGetError();
-                LOGE("eglSwapBuffers failed with error 0x%x", err);
-                if (err == EGL_BAD_SURFACE ||
-                    err == EGL_BAD_DISPLAY ||
-                    err == EGL_BAD_NATIVE_WINDOW) {
-                    std::unique_lock<std::mutex> lock(mWindowMutex);
-                    terminateEGL();
-                    eglReady = false;
-                }
-            }
+        glUseProgram(mProgram);
+        glBindVertexArray(mVao);
 
-            if (!hasData) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        /* Upload the latest guest frame if one arrived since last tick. */
+        bool hasGuestTexture = false;
+        {
+            std::unique_lock<std::mutex> lock(mFrameMutex);
+            if (mHasNewFrame && !mFrameBuffer.empty()) {
+                glBindTexture(GL_TEXTURE_2D, mTextureId);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                             mGuestFrameWidth, mGuestFrameHeight,
+                             0, GL_RGBA, GL_UNSIGNED_BYTE, mFrameBuffer.data());
+                mHasNewFrame = false;
+                hasGuestTexture = true;
+            } else if (!mFrameBuffer.empty()) {
+                hasGuestTexture = true;
             }
         }
+
+        timeVal += 0.016f;
+        if (timeLoc       >= 0) glUniform1f(timeLoc,       timeVal);
+        if (useTextureLoc >= 0) glUniform1i(useTextureLoc, hasGuestTexture ? 1 : 0);
+
+        if (hasGuestTexture) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, mTextureId);
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        if (!eglSwapBuffers(mEglDisplay, mEglSurface)) {
+            EGLint err = eglGetError();
+            LOGE("eglSwapBuffers failed 0x%x", err);
+            if (err == EGL_BAD_SURFACE ||
+                err == EGL_BAD_DISPLAY ||
+                err == EGL_BAD_NATIVE_WINDOW) {
+                std::unique_lock<std::mutex> lock(mWindowMutex);
+                terminateEGL();
+                eglReady = false;
+            }
+        }
+
+        /* Unconditional 16 ms pace — ~60 fps whether or not a guest frame
+         * arrived.  This keeps CPU load predictable and prevents the render
+         * thread from busy-spinning when the guest compositor is fast. */
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
     if (eglReady) {
