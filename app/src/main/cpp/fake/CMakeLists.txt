@@ -8,6 +8,8 @@ add_library(fake SHARED
     uid_spoof.cpp
     vfs_emu.cpp
     frame_producer.cpp
+    ipc_client.cpp
+    input_injector.cpp
     mount_emu.cpp
     seccomp_filter.cpp
 )

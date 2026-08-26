@@ -26,6 +26,14 @@
 /* Set to "1" by the launcher to install the SECCOMP denylist filter. */
 #define AC_ENV_SECCOMP "AC_SECCOMP"
 
+/* Guest-visible endpoint of the host IPC daemon. */
+#define AC_ENV_IPC_SOCK "AC_IPC_SOCK"
+#define AC_IPC_DEFAULT_SOCK "/.host.sock"
+
+/* Spool file where received touch events are appended for the guest
+ * input framework helper (fake_input) to consume. */
+#define AC_INPUT_SPOOL "/dev/ac_input"
+
 /* Default relative location of instances under the app files dir. */
 #define AC_INSTANCE_DIR "rootfs"
 
