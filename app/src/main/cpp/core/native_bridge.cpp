@@ -137,7 +137,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendTouch(
 
 /* ---- dynamic surface + batched input (orientation-aware) ---- */
 
-JNIEXPORT void JNICALL
+extern "C" JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceCreated(
         JNIEnv* env, jobject /*thiz*/, jobject surface) {
     ANativeWindow* window =
@@ -147,7 +147,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceCreat
     ANativeWindow_release(window); /* renderer keeps its own reference */
 }
 
-JNIEXPORT void JNICALL
+extern "C" JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceChanged(
         JNIEnv* env, jobject /*thiz*/, jobject surface, jint width, jint height) {
     ANativeWindow* window =
@@ -164,13 +164,13 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceChang
     accore::InputConsumer::getInstance().setHostSurfaceSize(width, height);
 }
 
-JNIEXPORT void JNICALL
+extern "C" JNIEXPORT void JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceDestroyed(
         JNIEnv* /*env*/, jobject /*thiz*/) {
     accore::DisplayRenderer::getInstance().destroyWindow();
 }
 
-JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendTouchEvent(
         JNIEnv* env, jobject /*thiz*/, jint action, jint pointer_count,
         jintArray pointer_ids, jfloatArray x_coords, jfloatArray y_coords,
@@ -200,7 +200,7 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendTouchEvent
     return delivered;
 }
 
-JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendKeyEvent(
         JNIEnv* /*env*/, jobject /*thiz*/, jint key_code, jboolean is_down) {
     return static_cast<jint>(accore::InputConsumer::getInstance().dispatchKeyEvent(
