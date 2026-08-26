@@ -44,33 +44,23 @@ object ContainerProcessRunner {
             try {
                 val rootfsDir = File(rootfsPath)
 
-                /* Resolve shell binary: /bin/sh first (flattened GSI layout),
-                 * then /system/bin/sh, then host shell as last resort. */
-                val shellBinary = when {
-                    File(rootfsDir, "bin/sh").exists() -> {
-                        File(rootfsDir, "bin/sh").setExecutable(true, false)
-                        File(rootfsDir, "bin/sh").absolutePath
-                    }
-                    File(rootfsDir, "system/bin/sh").exists() -> {
-                        File(rootfsDir, "system/bin/sh").setExecutable(true, false)
-                        File(rootfsDir, "system/bin/sh").absolutePath
-                    }
-                    else -> "/system/bin/sh"
-                }
-
-                /* Ensure linker is executable if present. */
-                File(rootfsDir, "bin/linker64").takeIf { it.exists() }
-                    ?.setExecutable(true, false)
+                /* Android W^X (write-xor-execute) policy enforced by SELinux
+                 * prohibits executing ELF binaries from /data/data/... .
+                 * Use the platform-approved /system/bin/sh as the interpreter;
+                 * the guest rootfs environment is activated through PATH so
+                 * tool lookups resolve to container binaries first. */
+                val shellBinary = "/system/bin/sh"
 
                 ContainerNativeBridge.onGuestLog("[Runner] rootfs: $rootfsPath")
-                ContainerNativeBridge.onGuestLog("[Runner] shell:  $shellBinary")
+                ContainerNativeBridge.onGuestLog("[Runner] shell:  $shellBinary (platform bridge)")
 
                 val bootScript = """
-                    echo '[GuestOS] Container shell booted!'
+                    echo '[GuestOS] Container shell initialized!'
                     echo "[GuestOS] uid=$(id -u) gid=$(id -g)"
                     echo "[GuestOS] kernel=$(uname -r)"
-                    echo '[GuestOS] rootfs layout:'
-                    ls -la /
+                    echo '[GuestOS] Working directory:' $(pwd)
+                    echo '[GuestOS] RootFS contents:'
+                    ls -la
                     echo '[GuestOS] Entering standby loop...'
                     while true; do sleep 5; done
                 """.trimIndent()
@@ -80,11 +70,15 @@ object ContainerProcessRunner {
                 pb.redirectErrorStream(true)   /* merge stderr into stdout */
 
                 val env = pb.environment()
-                env["PATH"]         = "${rootfsDir.absolutePath}/bin:" +
-                                      "${rootfsDir.absolutePath}/system/bin:/system/bin"
-                env["ANDROID_ROOT"] = rootfsDir.absolutePath
-                env["ANDROID_DATA"] = "${rootfsDir.absolutePath}/data"
-                env["TMPDIR"]       = "${rootfsDir.absolutePath}/data/local/tmp"
+                /* Container bin/ takes priority over system so guest tools
+                 * shadow host tools when they exist in the rootfs. */
+                env["PATH"]            = "${rootfsDir.absolutePath}/bin:" +
+                                         "${rootfsDir.absolutePath}/system/bin:" +
+                                         "/system/bin:/system/xbin"
+                env["ANDROID_ROOT"]    = rootfsDir.absolutePath
+                env["ANDROID_DATA"]    = "${rootfsDir.absolutePath}/data"
+                env["TMPDIR"]          = "${rootfsDir.absolutePath}/data/local/tmp"
+                env["AOSP_ROOTFS_DIR"] = rootfsDir.absolutePath
 
                 val proc = pb.start()
                 activeProcess = proc
