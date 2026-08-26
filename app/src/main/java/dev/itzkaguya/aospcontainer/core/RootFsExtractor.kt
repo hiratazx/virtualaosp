@@ -45,7 +45,13 @@ class RootFsExtractor(private val context: Context) {
                         var extractedCount = 0
 
                         while (entry != null) {
-                            val destFile = File(targetDir, entry.name)
+                            // Normalize archive paths: strip leading "./"
+                            // and "/" so entries like "./system/bin/init" or
+                            // "/system/bin/init" land under targetDir
+                            // consistently instead of relying on File's
+                            // join semantics for absolute children.
+                            val entryName = entry.name.removePrefix("./").removePrefix("/")
+                            val destFile = File(targetDir, entryName)
 
                             // Prevent Zip-Slip directory traversal
                             val canonicalDest = destFile.canonicalPath
@@ -116,7 +122,7 @@ class RootFsExtractor(private val context: Context) {
             File(rootFsDir, "bin/sh")
         )
 
-        val hasValidEntrypoint = possibleInitBinaries.any { it.exists() || isSymlink(it) }
+        val hasValidEntrypoint = possibleInitBinaries.any { nodeExists(it) }
 
         if (!hasValidEntrypoint) {
             throw IllegalStateException("Invalid RootFS: missing init or sh entrypoint binary")
@@ -130,6 +136,21 @@ class RootFsExtractor(private val context: Context) {
             androidApi = 34,
             minAppVersion = 1
         )
+    }
+
+    /**
+     * Node-level existence probe via Os.lstat: succeeds for regular files
+     * AND symlinks (even dangling ones whose target is not extracted
+     * yet), whereas File.exists() follows the link and can report false
+     * under host SELinux restrictions or broken link targets.
+     */
+    private fun nodeExists(file: File): Boolean {
+        return try {
+            android.system.Os.lstat(file.absolutePath)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun isSymlink(file: File): Boolean {
