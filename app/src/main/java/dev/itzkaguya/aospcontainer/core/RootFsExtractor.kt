@@ -128,6 +128,13 @@ class RootFsExtractor(private val context: Context) {
             throw IllegalStateException("Invalid RootFS: missing init or sh entrypoint binary")
         }
 
+        if (!hasLinker(rootFsDir)) {
+            throw IllegalStateException(
+                "Invalid RootFS: missing dynamic linker64 " +
+                    "(checked system/bin, bin and apex/com.android.runtime)",
+            )
+        }
+
         return ContainerManifest(
             id = "aosp_container_guest",
             name = "Generic AOSP RootFS",
@@ -136,6 +143,32 @@ class RootFsExtractor(private val context: Context) {
             androidApi = 34,
             minAppVersion = 1
         )
+    }
+
+    /**
+     * Modern AOSP images ship the dynamic linker inside the runtime APEX
+     * rather than (only) at system/bin/linker64. Accept every known
+     * layout; Os.lstat lets valid symlinks into the APEX runtime pass
+     * even when their target resolves outside app-readable paths.
+     */
+    private fun hasLinker(targetDir: File): Boolean {
+        val candidates = listOf(
+            "system/bin/linker64",
+            "bin/linker64",
+            "apex/com.android.runtime/bin/linker64",
+            "system/apex/com.android.runtime/bin/linker64",
+            "system_ext/apex/com.android.runtime/bin/linker64"
+        )
+        return candidates.any { path ->
+            val file = File(targetDir, path)
+            file.exists() || try {
+                val stat = android.system.Os.lstat(file.absolutePath)
+                android.system.OsConstants.S_ISREG(stat.st_mode) ||
+                        android.system.OsConstants.S_ISLNK(stat.st_mode)
+            } catch (e: Exception) {
+                false
+            }
+        }
     }
 
     /**
