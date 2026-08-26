@@ -119,6 +119,15 @@ fun ContainerViewportScreen(
         consoleLogs.add("[Guest]  Waiting for compositor output...")
     }
 
+    // Stream real guest stdout/stderr into the console HUD via logFlow
+    LaunchedEffect(Unit) {
+        ContainerNativeBridge.logFlow.collect { line ->
+            consoleLogs.add(line)
+            // Cap at 200 lines to bound memory
+            if (consoleLogs.size > 200) consoleLogs.removeAt(0)
+        }
+    }
+
     // Path 1: native STATE_RUNNING dispatched via InvokeStateCallback → StateFlow
     val containerState by (containerService?.containerState
         ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()

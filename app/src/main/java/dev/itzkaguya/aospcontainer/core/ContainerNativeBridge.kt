@@ -1,5 +1,9 @@
 package dev.itzkaguya.aospcontainer.core
 
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+
 /**
  * Kotlin interface to the container native bridge (`libcontainer_core`).
  *
@@ -21,6 +25,21 @@ object ContainerNativeBridge {
 
     init {
         System.loadLibrary("container_core")
+    }
+
+    /* ---- Guest log stream (Kotlin-only, no JNI) ---- */
+
+    private val _logFlow = MutableSharedFlow<String>(replay = 50, extraBufferCapacity = 200)
+
+    /** Live stream of lines from the guest process stdout/stderr. */
+    val logFlow: SharedFlow<String> = _logFlow.asSharedFlow()
+
+    /**
+     * Post a single log line from [ContainerProcessRunner] or any other
+     * guest output source into [logFlow]. Safe to call from any thread.
+     */
+    fun onGuestLog(line: String) {
+        _logFlow.tryEmit(line)
     }
 
     /** Fork/exec the guest init binary with libfake.so preloaded. */

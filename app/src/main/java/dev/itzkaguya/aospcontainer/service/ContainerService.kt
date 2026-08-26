@@ -18,7 +18,12 @@ import dev.itzkaguya.aospcontainer.MainActivity
 import dev.itzkaguya.aospcontainer.R
 import dev.itzkaguya.aospcontainer.core.ContainerCore
 import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
+import dev.itzkaguya.aospcontainer.core.ContainerProcessRunner
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +40,9 @@ class ContainerService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var guestPid = 0
+
+    /** Scope for ProcessBuilder reader coroutine and other service work. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Guest entrypoint for this session; defaults to full AOSP boot. */
     private var requestedInitPath: String = DEFAULT_INIT_PATH
@@ -99,6 +107,7 @@ class ContainerService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         stopGuest()
+        serviceScope.cancel()
         ContainerNativeBridge.nativeSetLifecycleListener(null)
         super.onDestroy()
     }
@@ -143,6 +152,9 @@ class ContainerService : Service() {
         if (pid > 0) {
             guestPid = pid
             Log.i(TAG, "container started pid=$pid rootfs=$rootfs frameFd=$frameFd")
+            /* Start the Kotlin-side ProcessBuilder runner in parallel so the
+             * console HUD receives real guest stdout/stderr output. */
+            ContainerProcessRunner.startGuest(rootfs, serviceScope)
         } else {
             Log.e(TAG, "container failed to start: errno=$pid")
             ContainerCore.nativeCloseFrameChannel()
@@ -151,6 +163,7 @@ class ContainerService : Service() {
     }
 
     private fun stopGuest() {
+        ContainerProcessRunner.stopGuest()
         if (guestPid > 0) {
             ContainerCore.nativeStopContainer(guestPid, GRACE_MS)
             guestPid = 0
