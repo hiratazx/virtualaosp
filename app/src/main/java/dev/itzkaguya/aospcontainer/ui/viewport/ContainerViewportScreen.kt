@@ -96,11 +96,20 @@ fun ContainerViewportScreen(
     var showConsole by remember { mutableStateOf(true) }
     val consoleLogs = remember { mutableStateListOf<String>() }
 
-    // Collect live container state from the bound service
-    val containerState by (containerService?.containerState
-        ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()
-    val isContainerRunning = containerState == ContainerNativeBridge.STATE_RUNNING
+    /* isContainerReady: cleared by three independent paths so the spinner
+     * always dismisses regardless of which arrives first:
+     *   1. native lifecycle callback fires STATE_RUNNING (via InvokeStateCallback)
+     *   2. SurfaceHolder.surfaceCreated — native window is attached
+     *   3. 1.5 s fallback timeout in case both above race or are missed */
+    var isContainerReady by remember { mutableStateOf(false) }
 
+    // Path 3: hard timeout so the overlay never blocks the user permanently
+    LaunchedEffect(Unit) {
+        delay(1500)
+        isContainerReady = true
+    }
+
+    // Console seed log
     LaunchedEffect(Unit) {
         consoleLogs.add("[Engine] Initializing container runtime...")
         consoleLogs.add("[Engine] Guest rootfs: ${rootfsPath ?: "<default>"}")
@@ -108,6 +117,13 @@ fun ContainerViewportScreen(
         consoleLogs.add("[Engine] Frame channel initializing (720x1280 x4 slots)...")
         consoleLogs.add("[Guest]  Process spawning via linker64...")
         consoleLogs.add("[Guest]  Waiting for compositor output...")
+    }
+
+    // Path 1: native STATE_RUNNING dispatched via InvokeStateCallback → StateFlow
+    val containerState by (containerService?.containerState
+        ?: kotlinx.coroutines.flow.MutableStateFlow(0)).collectAsState()
+    LaunchedEffect(containerState) {
+        if (containerState == ContainerNativeBridge.STATE_RUNNING) isContainerReady = true
     }
 
     val serviceConnection = remember {
@@ -154,6 +170,8 @@ fun ContainerViewportScreen(
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
                             ContainerNativeBridge.nativeOnSurfaceCreated(holder.surface)
+                            // Path 2: surface attached — native renderer is live
+                            isContainerReady = true
                         }
 
                         override fun surfaceChanged(
@@ -289,8 +307,8 @@ fun ContainerViewportScreen(
             )
         }
 
-        // 6. Startup Loading Overlay — visible until STATE_RUNNING
-        if (!isContainerRunning) {
+        // 6. Startup Loading Overlay — dismissed by surface attach or STATE_RUNNING
+        if (!isContainerReady) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -307,13 +325,7 @@ fun ContainerViewportScreen(
                         modifier = Modifier.size(52.dp)
                     )
                     Text(
-                        text = when (containerState) {
-                            ContainerNativeBridge.STATE_STARTING -> "Starting container…"
-                            ContainerNativeBridge.STATE_RUNNING  -> "Running"
-                            ContainerNativeBridge.STATE_CRASHED  -> "Container crashed"
-                            ContainerNativeBridge.STATE_TERMINATED -> "Terminated"
-                            else -> "Waiting for container…"
-                        },
+                        text = "Booting container\u2026",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         fontFamily = FontFamily.Monospace

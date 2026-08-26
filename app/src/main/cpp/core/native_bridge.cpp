@@ -79,7 +79,18 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeStartContainer
     cfg.initBinaryPath = to_std(init_binary_path);
     if (cfg.rootfsPath.empty() || cfg.initBinaryPath.empty()) return JNI_FALSE;
 
-    return GuestLauncher::getInstance().startContainer(cfg) ? JNI_TRUE : JNI_FALSE;
+    bool started = GuestLauncher::getInstance().startContainer(cfg);
+
+    /* Dispatch STATE_RUNNING immediately upon successful spawn.
+     * The GuestLauncher state callback only fires from monitorLoop() when
+     * waitpid() returns (i.e. the guest exits), so STATE_RUNNING would
+     * otherwise never reach the Kotlin side while the container is alive. */
+    if (started) {
+        InvokeStateCallback(2 /* STATE_RUNNING */, 0);
+    }
+
+    return started ? JNI_TRUE : JNI_FALSE;
+
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
