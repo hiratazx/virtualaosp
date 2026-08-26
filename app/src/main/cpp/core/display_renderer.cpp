@@ -369,16 +369,14 @@ void DisplayRenderer::renderLoop() {
                 glBindTexture(GL_TEXTURE_2D, mTextureId);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             } else {
-                /* Diagnostic pulse: sinusoidal brightness sweep (#0A0A14 to
-                 * #1E1E30, period ~2s) so the viewport is clearly alive while
-                 * waiting for the first guest frame. */
-                auto now = std::chrono::steady_clock::now();
-                double t = std::chrono::duration<double>(
-                    now.time_since_epoch()).count();
-                float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(t * 3.14159));
-                float r = 0.039f + pulse * 0.078f;
-                float g = 0.039f + pulse * 0.078f;
-                float b = 0.078f + pulse * 0.118f;
+                /* Animated standby: accumulating phase drives three colour
+                 * channels at staggered offsets giving a blue-slate shimmer.
+                 * Distinct enough from a dead black screen at any brightness. */
+                static float phase = 0.0f;
+                phase += 0.03f;
+                float r = 0.08f + 0.04f * std::sin(phase);
+                float g = 0.10f + 0.05f * std::sin(phase + 1.5f);
+                float b = 0.16f + 0.06f * std::sin(phase + 3.0f);
                 glClearColor(r, g, b, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
             }

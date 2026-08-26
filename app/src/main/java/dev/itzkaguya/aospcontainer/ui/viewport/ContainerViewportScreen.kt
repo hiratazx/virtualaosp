@@ -22,23 +22,31 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -47,7 +55,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,6 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -80,6 +91,17 @@ fun ContainerViewportScreen(
 
     var isSidebarExpanded by remember { mutableStateOf(false) }
     var showPowerDialog by remember { mutableStateOf(false) }
+    var showConsole by remember { mutableStateOf(true) }
+    val consoleLogs = remember { mutableStateListOf<String>() }
+
+    LaunchedEffect(Unit) {
+        consoleLogs.add("[Engine] Initializing container runtime...")
+        consoleLogs.add("[Engine] Guest rootfs: ${rootfsPath ?: "<default>"}")
+        consoleLogs.add("[Engine] Init binary: $initBinary")
+        consoleLogs.add("[Engine] Frame channel initializing (720x1280 x4 slots)...")
+        consoleLogs.add("[Guest]  Process spawning via linker64...")
+        consoleLogs.add("[Guest]  Waiting for compositor output...")
+    }
 
     val serviceConnection = remember {
         object : ServiceConnection {
@@ -144,7 +166,60 @@ fun ContainerViewportScreen(
             }
         )
 
-        // 2. Outside click area to auto-collapse the sidebar
+        // 2. Diagnostic Console HUD (top 35% overlay)
+        if (showConsole) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.35f)
+                    .align(Alignment.TopStart)
+                    .padding(16.dp),
+                color = Color.Black.copy(alpha = 0.78f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Container Console",
+                            color = Color(0xFF00E676),  // Material Green A400
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        IconButton(
+                            onClick = { showConsole = false },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close console",
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        color = Color.DarkGray,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(consoleLogs) { line ->
+                            Text(
+                                text = line,
+                                color = Color(0xFFB0BEC5),  // Blue Grey 200
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Outside click area to auto-collapse the sidebar
         if (isSidebarExpanded) {
             Box(
                 modifier = Modifier
@@ -185,7 +260,7 @@ fun ContainerViewportScreen(
             }
         }
 
-        // 4. Floating Sidebar Menu (When Expanded)
+        // 5. Floating Sidebar Menu (When Expanded)
         AnimatedVisibility(
             visible = isSidebarExpanded,
             enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
@@ -202,6 +277,8 @@ fun ContainerViewportScreen(
                 onVolumeUp = { sendKey(KeyEvent.KEYCODE_VOLUME_UP) },
                 onVolumeDown = { sendKey(KeyEvent.KEYCODE_VOLUME_DOWN) },
                 onPowerOptions = { showPowerDialog = true },
+                isConsoleVisible = showConsole,
+                onToggleConsole = { showConsole = !showConsole },
             )
         }
 

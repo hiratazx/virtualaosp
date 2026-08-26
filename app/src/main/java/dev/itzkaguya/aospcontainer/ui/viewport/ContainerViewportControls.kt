@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.CropSquare
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +39,8 @@ internal fun SidebarContent(
     onVolumeUp: () -> Unit,
     onVolumeDown: () -> Unit,
     onPowerOptions: () -> Unit,
+    isConsoleVisible: Boolean = false,
+    onToggleConsole: () -> Unit = {},
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -55,6 +58,17 @@ internal fun SidebarContent(
                 icon = Icons.Default.ChevronRight,
                 contentDesc = "Collapse",
                 onClick = onCollapse
+            )
+
+            // Console toggle — tinted green when the console is visible
+            SidebarIconButton(
+                icon = Icons.Default.Terminal,
+                contentDesc = if (isConsoleVisible) "Hide Console" else "Show Console",
+                tint = if (isConsoleVisible)
+                    Color(0xFF00E676)      // Material Green A400
+                else
+                    MaterialTheme.colorScheme.onSurface,
+                onClick = onToggleConsole
             )
 
             HorizontalDivider(modifier = Modifier.width(28.dp).padding(vertical = 4.dp))
