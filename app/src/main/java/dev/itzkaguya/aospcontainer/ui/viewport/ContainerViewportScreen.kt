@@ -12,23 +12,55 @@ import android.view.SurfaceView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.PowerOff
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
-import dev.itzkaguya.aospcontainer.core.NativeContainerState
 import dev.itzkaguya.aospcontainer.service.ContainerService
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @SuppressLint("ClickableViewAccessibility")
 @Composable
@@ -39,9 +71,12 @@ fun ContainerViewportScreen(
     initBinary: String = "/system/bin/sh"
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var containerService by remember { mutableStateOf<ContainerService?>(null) }
     var isBound by remember { mutableStateOf(false) }
-    var showControls by remember { mutableStateOf(false) }
+
+    var isSidebarExpanded by remember { mutableStateOf(false) }
+    var showPowerDialog by remember { mutableStateOf(false) }
 
     val serviceConnection = remember {
         object : ServiceConnection {
@@ -76,6 +111,7 @@ fun ContainerViewportScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
+        // 1. Core Viewport Display
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -94,7 +130,6 @@ fun ContainerViewportScreen(
                             width: Int,
                             height: Int
                         ) {
-                            // Handles dynamic orientation changes, multi-window split, and tablet rotation
                             ContainerNativeBridge.nativeOnSurfaceChanged(holder.surface, width, height)
                         }
 
@@ -106,107 +141,127 @@ fun ContainerViewportScreen(
             }
         )
 
-        IconButton(
-            onClick = { showControls = !showControls },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .background(
-                    color = Color.Black.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(50)
-                )
-        ) {
-            Icon(
-                imageVector = if (showControls) Icons.Default.Close else Icons.Default.Tune,
-                contentDescription = "Toggle Controls",
-                tint = Color.White
+        // 2. Outside click area to auto-collapse the sidebar
+        if (isSidebarExpanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        isSidebarExpanded = false
+                    }
             )
         }
 
+        // 3. Collapsible Floating Trigger Pill (When Collapsed)
         AnimatedVisibility(
-            visible = showControls,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            visible = !isSidebarExpanded,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 4.dp)
         ) {
-            ContainerControlBar(
+            Surface(
+                onClick = { isSidebarExpanded = true },
+                shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp).copy(alpha = 0.75f),
+                tonalElevation = 6.dp,
+                modifier = Modifier.size(width = 24.dp, height = 56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronLeft,
+                        contentDescription = "Expand Sidebar",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // 4. Floating Sidebar Menu (When Expanded)
+        AnimatedVisibility(
+            visible = isSidebarExpanded,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp)
+        ) {
+            SidebarContent(
+                onCollapse = { isSidebarExpanded = false },
                 onBack = { sendKey(KeyEvent.KEYCODE_BACK) },
                 onHome = { sendKey(KeyEvent.KEYCODE_HOME) },
                 onRecents = { sendKey(KeyEvent.KEYCODE_APP_SWITCH) },
-                onVolumeDown = { sendKey(KeyEvent.KEYCODE_VOLUME_DOWN) },
                 onVolumeUp = { sendKey(KeyEvent.KEYCODE_VOLUME_UP) },
-                onPower = { sendKey(KeyEvent.KEYCODE_POWER) },
-                onCloseContainer = {
-                    ContainerService.stop(context)
-                    onExitContainer()
+                onVolumeDown = { sendKey(KeyEvent.KEYCODE_VOLUME_DOWN) },
+                onPowerOptions = { showPowerDialog = true },
+            )
+        }
+
+        // 5. Power Actions Modal Dialog
+        if (showPowerDialog) {
+            AlertDialog(
+                onDismissRequest = { showPowerDialog = false },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.PowerSettingsNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                },
+                title = { Text("Guest OS Power Management") },
+                text = { Text("Select an action to perform on the container instance.") },
+                confirmButton = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                showPowerDialog = false
+                                isSidebarExpanded = false
+                                coroutineScope.launch {
+                                    ContainerService.stop(context)
+                                    delay(600)
+                                    ContainerService.start(context, rootfsPath, initBinary)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Restart Container")
+                        }
+
+                        Button(
+                            onClick = {
+                                showPowerDialog = false
+                                isSidebarExpanded = false
+                                ContainerService.stop(context)
+                                onExitContainer()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PowerOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Shutdown & Quit")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showPowerDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cancel")
+                    }
                 }
             )
         }
     }
-}
-
-@Composable
-private fun ContainerControlBar(
-    onBack: () -> Unit,
-    onHome: () -> Unit,
-    onRecents: () -> Unit,
-    onVolumeDown: () -> Unit,
-    onVolumeUp: () -> Unit,
-    onPower: () -> Unit,
-    onCloseContainer: () -> Unit
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(6.dp).copy(alpha = 0.92f),
-        shape = RoundedCornerShape(28.dp),
-        modifier = Modifier
-            .padding(16.dp)
-            .navigationBarsPadding()
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ControlIconButton(icon = Icons.Default.ArrowBack, contentDesc = "Back", onClick = onBack)
-            ControlIconButton(icon = Icons.Default.Circle, contentDesc = "Home", onClick = onHome)
-            ControlIconButton(icon = Icons.Default.CropSquare, contentDesc = "Recents", onClick = onRecents)
-
-            VerticalDivider(modifier = Modifier.height(24.dp).padding(horizontal = 4.dp))
-
-            ControlIconButton(icon = Icons.Default.VolumeDown, contentDesc = "Vol -", onClick = onVolumeDown)
-            ControlIconButton(icon = Icons.Default.VolumeUp, contentDesc = "Vol +", onClick = onVolumeUp)
-            ControlIconButton(icon = Icons.Default.PowerSettingsNew, contentDesc = "Power", onClick = onPower)
-
-            VerticalDivider(modifier = Modifier.height(24.dp).padding(horizontal = 4.dp))
-
-            ControlIconButton(
-                icon = Icons.Default.ExitToApp,
-                contentDesc = "Exit",
-                tint = MaterialTheme.colorScheme.error,
-                onClick = onCloseContainer
-            )
-        }
-    }
-}
-
-@Composable
-private fun ControlIconButton(
-    icon: ImageVector,
-    contentDesc: String,
-    tint: Color = MaterialTheme.colorScheme.onSurface,
-    onClick: () -> Unit
-) {
-    IconButton(onClick = onClick) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDesc,
-            tint = tint,
-            modifier = Modifier.size(22.dp)
-        )
-    }
-}
-
-private fun sendKey(keyCode: Int) {
-    ContainerNativeBridge.nativeSendKeyEvent(keyCode, isDown = true)
-    ContainerNativeBridge.nativeSendKeyEvent(keyCode, isDown = false)
 }
