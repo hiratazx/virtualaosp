@@ -87,7 +87,7 @@ class RootFsExtractor(private val context: Context) {
                             }
 
                             extractedCount++
-                            if (extractedCount % 25 == 0) {
+                            if (extractedCount % 75 == 0) {
                                 emit(ExtractionState.Progress(-1, entry.name))
                             }
 

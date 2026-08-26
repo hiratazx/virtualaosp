@@ -53,12 +53,21 @@ fun InstallScreen(
                 .padding(24.dp),
             contentAlignment = Alignment.Center
         ) {
+            // Stable discriminator key: AnimatedContent only fires a
+            // transition when the *stage* changes, not on every file update.
+            val stateKey = when (uiState) {
+                is RomUiState.NotInstalled -> "NOT_INSTALLED"
+                is RomUiState.Extracting   -> "EXTRACTING"
+                is RomUiState.Ready        -> "READY"
+                is RomUiState.Error        -> "ERROR"
+            }
+
             AnimatedContent(
-                targetState = uiState,
-                label = "RomStateTransition"
-            ) { state ->
-                when (state) {
-                    is RomUiState.NotInstalled -> {
+                targetState = stateKey,
+                label = "RomStageTransition"
+            ) { targetKey ->
+                when (targetKey) {
+                    "NOT_INSTALLED" -> {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             shape = RoundedCornerShape(24.dp),
@@ -100,7 +109,10 @@ fun InstallScreen(
                         }
                     }
 
-                    is RomUiState.Extracting -> {
+                    "EXTRACTING" -> {
+                        // Read uiState directly — recomposition updates the
+                        // filename/progress smoothly with no AnimatedContent jank.
+                        val extractingState = uiState as? RomUiState.Extracting
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             shape = RoundedCornerShape(24.dp)
@@ -116,10 +128,10 @@ fun InstallScreen(
                                 )
                                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 Text(
-                                    text = state.currentFile,
+                                    text = extractingState?.currentFile ?: "Unpacking rootfs...",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontFamily = FontFamily.Monospace,
-                                    maxLines = 2,
+                                    maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -127,7 +139,9 @@ fun InstallScreen(
                         }
                     }
 
-                    is RomUiState.Ready -> {
+                    "READY" -> {
+                        val readyState = uiState as? RomUiState.Ready
+                        val manifest = readyState?.manifest ?: return@AnimatedContent
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             shape = RoundedCornerShape(24.dp),
@@ -151,7 +165,7 @@ fun InstallScreen(
                                     )
                                     Column {
                                         Text(
-                                            text = state.manifest.name,
+                                            text = manifest.name,
                                             style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -166,9 +180,9 @@ fun InstallScreen(
                                 HorizontalDivider()
 
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    DetailRow(label = "Architecture", value = state.manifest.arch)
-                                    DetailRow(label = "Android API", value = "Android ${state.manifest.androidApi}")
-                                    DetailRow(label = "Version", value = state.manifest.version)
+                                    DetailRow(label = "Architecture", value = manifest.arch)
+                                    DetailRow(label = "Android API", value = "Android ${manifest.androidApi}")
+                                    DetailRow(label = "Version", value = manifest.version)
                                 }
 
                                 Spacer(Modifier.height(8.dp))
@@ -215,7 +229,8 @@ fun InstallScreen(
                         }
                     }
 
-                    is RomUiState.Error -> {
+                    "ERROR" -> {
+                        val errorState = uiState as? RomUiState.Error
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             shape = RoundedCornerShape(24.dp),
@@ -232,7 +247,7 @@ fun InstallScreen(
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                                 Text(
-                                    text = state.message,
+                                    text = errorState?.message ?: "An unknown error occurred.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
