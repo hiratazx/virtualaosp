@@ -13,8 +13,11 @@
 #include <vector>
 #include <unistd.h>
 
+#include <android/log.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+
+#define GUEST_LOG_TAG "GuestConsole"
 
 using accore::ContainerState;
 using accore::GuestLauncher;
@@ -53,6 +56,33 @@ void ReportExecFailure(int* pipe_fd, int err) {
 
 } // namespace
 
+namespace {
+
+/* Reads lines from fd and forwards each to logcat. Exits when the write
+ * end of the pipe is closed (guest exited). Runs on a detached thread. */
+void logcatPump(int read_fd) {
+    char buf[4096];
+    std::string line;
+    ssize_t n;
+    while ((n = read(read_fd, buf, sizeof(buf) - 1)) > 0) {
+        buf[n] = '\0';
+        for (ssize_t i = 0; i < n; ++i) {
+            if (buf[i] == '\n') {
+                __android_log_print(ANDROID_LOG_INFO, GUEST_LOG_TAG, "%s", line.c_str());
+                line.clear();
+            } else {
+                line += buf[i];
+            }
+        }
+    }
+    if (!line.empty()) {
+        __android_log_print(ANDROID_LOG_INFO, GUEST_LOG_TAG, "%s", line.c_str());
+    }
+    close(read_fd);
+}
+
+} // namespace
+
 namespace accore {
 
 pid_t GuestLauncher::Start(const LaunchConfig& cfg) {
@@ -71,16 +101,32 @@ pid_t GuestLauncher::Start(const LaunchConfig& cfg) {
         return -errno;
     }
 
+    /* Stdout/stderr capture pipe for guest boot diagnostics. */
+    int log_pipe[2];
+    if (pipe2(log_pipe, O_CLOEXEC) != 0) {
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        return -errno;
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         close(err_pipe[0]);
         close(err_pipe[1]);
+        close(log_pipe[0]);
+        close(log_pipe[1]);
         return -errno;
     }
 
     if (pid == 0) {
         /* ---- child: async-signal-safe code until execve ---- */
         close(err_pipe[0]);
+        /* Redirect stdout + stderr into the diagnostic log pipe so the
+         * parent's logcatPump thread can forward boot output to logcat. */
+        close(log_pipe[0]);
+        dup2(log_pipe[1], STDOUT_FILENO);
+        dup2(log_pipe[1], STDERR_FILENO);
+        close(log_pipe[1]);
         setsid();
 
         const std::string init_abs = cfg.rootfs_dir + cfg.init_path;
@@ -111,6 +157,11 @@ pid_t GuestLauncher::Start(const LaunchConfig& cfg) {
 
     /* ---- parent ---- */
     close(err_pipe[1]);
+    /* Close the write end so the pump thread sees EOF when the guest exits. */
+    close(log_pipe[1]);
+
+    /* Spin up the logcat pump thread; it owns log_pipe[0] and closes it. */
+    std::thread(logcatPump, log_pipe[0]).detach();
 
     int child_errno = 0;
     ssize_t n = read(err_pipe[0], &child_errno, sizeof(child_errno));

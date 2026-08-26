@@ -368,8 +368,18 @@ void DisplayRenderer::renderLoop() {
                 glBindTexture(GL_TEXTURE_2D, mTextureId);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             } else if (diagnosticFallbackEnabled()) {
-                // Standby pulse pattern (#1A1A20 base)
-                glClearColor(0.10f, 0.10f, 0.12f, 1.0f);
+                // Animated standby: sinusoidal brightness pulse (period ~2s)
+                // sweeps between #0A0A14 and #1E1E30 so the screen visibly
+                // indicates the EGL surface is alive while waiting for the
+                // first guest frame.
+                auto now = std::chrono::steady_clock::now();
+                double t = std::chrono::duration<double>(
+                    now.time_since_epoch()).count();
+                float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(t * 3.14159));
+                float r = 0.039f + pulse * 0.078f;  /* 0A -> 1E */
+                float g = 0.039f + pulse * 0.078f;
+                float b = 0.078f + pulse * 0.118f;  /* 14 -> 30 */
+                glClearColor(r, g, b, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
             }
 

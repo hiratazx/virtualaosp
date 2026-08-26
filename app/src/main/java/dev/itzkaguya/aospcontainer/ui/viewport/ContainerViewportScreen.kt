@@ -25,13 +25,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.PowerOff
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -40,6 +40,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,6 +56,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
@@ -210,33 +213,59 @@ fun ContainerViewportScreen(
                     Icon(
                         imageVector = Icons.Default.PowerSettingsNew,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(32.dp)
                     )
                 },
-                title = { Text("Guest OS Power Management") },
-                text = { Text("Select an action to perform on the container instance.") },
-                confirmButton = {
+                title = {
+                    Text(
+                        text = "Guest OS Power",
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Text(
+                            text = "Select an action to manage the container instance.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Restart Container Button
                         FilledTonalButton(
                             onClick = {
                                 showPowerDialog = false
                                 isSidebarExpanded = false
                                 coroutineScope.launch {
                                     ContainerService.stop(context)
-                                    delay(600)
+                                    delay(500)
                                     ContainerService.start(context, rootfsPath, initBinary)
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Spacer(Modifier.width(8.dp))
                             Text("Restart Container")
                         }
 
+                        // Shutdown Container Button
                         Button(
                             onClick = {
                                 showPowerDialog = false
@@ -244,23 +273,38 @@ fun ContainerViewportScreen(
                                 ContainerService.stop(context)
                                 onExitContainer()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.fillMaxWidth()
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Default.PowerOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.PowerSettingsNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Spacer(Modifier.width(8.dp))
-                            Text("Shutdown & Quit")
+                            Text("Shutdown & Quit", fontWeight = FontWeight.Bold)
+                        }
+
+                        // Cancel Button
+                        OutlinedButton(
+                            onClick = { showPowerDialog = false },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Cancel")
                         }
                     }
                 },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showPowerDialog = false },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Cancel")
-                    }
-                }
+                confirmButton = {},
+                dismissButton = {}
             )
         }
     }
