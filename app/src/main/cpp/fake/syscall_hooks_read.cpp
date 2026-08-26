@@ -9,6 +9,7 @@
  */
 #include "fake_state.h"
 #include "path_redirect.h"
+#include "uid_spoof.h"
 #include "log.h"
 
 #include <dirent.h>
@@ -61,6 +62,7 @@ public:
 
     const char* get() const { return value_; }
     bool overflowed() const { return result_ == MapResult::Overflow; }
+    bool mapped() const { return result_ == MapResult::Mapped; }
 
 private:
     MapResult result_;
@@ -180,7 +182,9 @@ AC_EXPORT int stat(const char* path, struct stat* st) {
     Translated t(path);
     if (t.overflowed()) return fail_enametoolong();
     using Fn = int (*)(const char*, struct stat*);
-    return reinterpret_cast<Fn>(next_sym(&s_real, "stat"))(t.get(), st);
+    int rc = reinterpret_cast<Fn>(next_sym(&s_real, "stat"))(t.get(), st);
+    if (rc == 0 && t.mapped()) acfake::fix_stat_owner(st);
+    return rc;
 }
 
 AC_EXPORT int lstat(const char* path, struct stat* st) {
@@ -188,7 +192,9 @@ AC_EXPORT int lstat(const char* path, struct stat* st) {
     Translated t(path);
     if (t.overflowed()) return fail_enametoolong();
     using Fn = int (*)(const char*, struct stat*);
-    return reinterpret_cast<Fn>(next_sym(&s_real, "lstat"))(t.get(), st);
+    int rc = reinterpret_cast<Fn>(next_sym(&s_real, "lstat"))(t.get(), st);
+    if (rc == 0 && t.mapped()) acfake::fix_stat_owner(st);
+    return rc;
 }
 
 AC_EXPORT int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
@@ -197,7 +203,9 @@ AC_EXPORT int fstatat(int dirfd, const char* path, struct stat* st, int flags) {
         Translated t(path);
         if (t.overflowed()) return fail_enametoolong();
         using Fn = int (*)(int, const char*, struct stat*, int);
-        return reinterpret_cast<Fn>(next_sym(&s_real, "fstatat"))(dirfd, t.get(), st, flags);
+        int rc = reinterpret_cast<Fn>(next_sym(&s_real, "fstatat"))(dirfd, t.get(), st, flags);
+        if (rc == 0 && t.mapped()) acfake::fix_stat_owner(st);
+        return rc;
     }
     using Fn = int (*)(int, const char*, struct stat*, int);
     return reinterpret_cast<Fn>(next_sym(&s_real, "fstatat"))(dirfd, path, st, flags);

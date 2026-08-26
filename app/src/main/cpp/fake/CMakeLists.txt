@@ -4,6 +4,7 @@ add_library(fake SHARED
     path_redirect.cpp
     syscall_hooks_read.cpp
     syscall_hooks_write.cpp
+    uid_spoof.cpp
 )
 
 target_link_libraries(fake PRIVATE
