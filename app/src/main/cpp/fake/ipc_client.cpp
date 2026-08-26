@@ -59,6 +59,16 @@ void Dispatch(uint16_t type, const uint8_t* data, uint32_t len) {
             inject_touch(&ev);
             break;
         }
+        case AC_IPC_INPUT_KEY: {
+            if (len != sizeof(struct AcKeyEvent)) {
+                AC_LOGW("key packet size mismatch: %u", len);
+                return;
+            }
+            struct AcKeyEvent kev;
+            memcpy(&kev, data, sizeof(kev));
+            inject_key(&kev);
+            break;
+        }
         default:
             break; /* PONG/STATE/etc: nothing to do guest-side yet */
     }

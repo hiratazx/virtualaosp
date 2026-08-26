@@ -23,6 +23,7 @@ enum {
     AC_IPC_GUEST_READY = 0x04,
     AC_IPC_SHUTDOWN = 0x05,
     AC_IPC_INPUT_TOUCH = 0x10,
+    AC_IPC_INPUT_KEY = 0x11,
 };
 
 /* Normalized touch event. Coordinates use 16.16 fixed point in [0,65535]
@@ -33,6 +34,12 @@ struct AcTouchEvent {
     uint32_t x_fixed;     /* 16.16 */
     uint32_t y_fixed;     /* 16.16 */
     uint32_t pressure;    /* 0..65535 */
+};
+
+/* Key event record; action 0 = down, 1 = up. */
+struct AcKeyEvent {
+    uint32_t keycode;
+    uint32_t action;
 };
 
 /* Subset of MotionEvent actions the bridge forwards. */

@@ -25,6 +25,9 @@ bool input_injector_init(void);
 /* Append one event to the spool. Thread-safe. */
 bool inject_touch(const struct AcTouchEvent* ev);
 
+/* Append one key event to the key spool (/dev/ac_keys). Thread-safe. */
+bool inject_key(const struct AcKeyEvent* ev);
+
 } // namespace acfake
 
 #endif /* INPUT_INJECTOR_H */
