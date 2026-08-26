@@ -59,4 +59,31 @@ object ContainerNativeBridge {
         yFixed: Int,
         pressure: Int,
     ): Int
+
+    /* ---- dynamic surface lifecycle (orientation-aware) ---- */
+
+    /** Bind a freshly created surface to the EGL renderer. */
+    external fun nativeOnSurfaceCreated(surface: android.view.Surface)
+
+    /** Re-bind + resize on rotation, fold, or multi-window changes. */
+    external fun nativeOnSurfaceChanged(surface: android.view.Surface, width: Int, height: Int)
+
+    /** Release the window; EGL context is preserved for rebind. */
+    external fun nativeOnSurfaceDestroyed()
+
+    /**
+     * Multi-pointer batch in HOST PIXELS of the current orientation;
+     * the native layer normalizes against the live surface size.
+     */
+    external fun nativeSendTouchEvent(
+        action: Int,
+        pointerCount: Int,
+        pointerIds: IntArray,
+        xCoords: FloatArray,
+        yCoords: FloatArray,
+        pressures: FloatArray,
+    ): Int
+
+    /** Android keycode injection; [isDown] mirrors KeyEvent down/up. */
+    external fun nativeSendKeyEvent(keyCode: Int, isDown: Boolean): Int
 }

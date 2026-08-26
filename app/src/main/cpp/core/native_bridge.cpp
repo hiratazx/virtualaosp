@@ -134,3 +134,75 @@ Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendTouch(
         static_cast<uint32_t>(x_fixed), static_cast<uint32_t>(y_fixed),
         static_cast<uint32_t>(pressure)));
 }
+
+/* ---- dynamic surface + batched input (orientation-aware) ---- */
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceCreated(
+        JNIEnv* env, jobject /*thiz*/, jobject surface) {
+    ANativeWindow* window =
+        surface != nullptr ? ANativeWindow_fromSurface(env, surface) : nullptr;
+    if (window == nullptr) return;
+    accore::DisplayRenderer::getInstance().setNativeWindow(window);
+    ANativeWindow_release(window); /* renderer keeps its own reference */
+}
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceChanged(
+        JNIEnv* env, jobject /*thiz*/, jobject surface, jint width, jint height) {
+    ANativeWindow* window =
+        surface != nullptr ? ANativeWindow_fromSurface(env, surface) : nullptr;
+    auto& renderer = accore::DisplayRenderer::getInstance();
+    if (window != nullptr) {
+        renderer.setNativeWindow(window);
+        ANativeWindow_release(window);
+    }
+    renderer.updateWindowSize(width, height);
+
+    /* Touch normalization follows the live surface geometry so rotation
+     * and multi-window resizes rescale 1:1 without any host-side math. */
+    accore::InputConsumer::getInstance().setHostSurfaceSize(width, height);
+}
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeOnSurfaceDestroyed(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    accore::DisplayRenderer::getInstance().destroyWindow();
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendTouchEvent(
+        JNIEnv* env, jobject /*thiz*/, jint action, jint pointer_count,
+        jintArray pointer_ids, jfloatArray x_coords, jfloatArray y_coords,
+        jfloatArray pressures) {
+    auto& consumer = accore::InputConsumer::getInstance();
+    if (pointer_count <= 0 || pointer_ids == nullptr || x_coords == nullptr ||
+        y_coords == nullptr || pressures == nullptr) {
+        return 0;
+    }
+
+    jint* ids = env->GetIntArrayElements(pointer_ids, nullptr);
+    jfloat* xs = env->GetFloatArrayElements(x_coords, nullptr);
+    jfloat* ys = env->GetFloatArrayElements(y_coords, nullptr);
+    jfloat* ps = env->GetFloatArrayElements(pressures, nullptr);
+
+    jint delivered = static_cast<jint>(consumer.dispatchTouchEventBatch(
+        static_cast<uint32_t>(action), static_cast<uint32_t>(pointer_count),
+        reinterpret_cast<const uint32_t*>(ids),
+        reinterpret_cast<const float*>(xs),
+        reinterpret_cast<const float*>(ys),
+        reinterpret_cast<const float*>(ps)));
+
+    env->ReleaseIntArrayElements(pointer_ids, ids, JNI_ABORT);
+    env->ReleaseFloatArrayElements(x_coords, xs, JNI_ABORT);
+    env->ReleaseFloatArrayElements(y_coords, ys, JNI_ABORT);
+    env->ReleaseFloatArrayElements(pressures, ps, JNI_ABORT);
+    return delivered;
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerNativeBridge_nativeSendKeyEvent(
+        JNIEnv* /*env*/, jobject /*thiz*/, jint key_code, jboolean is_down) {
+    return static_cast<jint>(accore::InputConsumer::getInstance().dispatchKeyEvent(
+        static_cast<uint32_t>(key_code), is_down == JNI_TRUE));
+}
