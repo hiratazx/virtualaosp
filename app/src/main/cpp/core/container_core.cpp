@@ -5,9 +5,13 @@
  * their own translation units.
  */
 #include "launcher.h"
+#include "ipc.h"
+#include "log.h"
 
 #include <jni.h>
+#include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #define CORE_VERSION "0.1.0"
@@ -25,6 +29,22 @@ std::string ToStd(JNIEnv* env, jstring s) {
     std::string result(chars);
     env->ReleaseStringUTFChars(s, chars);
     return result;
+}
+
+/* Bridges guest messages into logcat until dedicated subsystems
+ * (input/frame pipelines) register their own handlers in later phases. */
+class LoggingIpcHandler : public accore::IpcMessageHandler {
+public:
+    void OnMessage(int client_fd, uint16_t type,
+                   const uint8_t* data, uint32_t len) override {
+        AC_LOGD("ipc msg fd=%d type=0x%02x len=%u", client_fd, type, len);
+        (void)data;
+    }
+};
+
+accore::IpcServer& Ipc() {
+    static accore::IpcServer server;
+    return server;
 }
 
 } // namespace
@@ -78,5 +98,35 @@ JNIEXPORT jint JNICALL
 Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeGetState(
         JNIEnv* /*env*/, jobject /*thiz*/) {
     return static_cast<jint>(GuestLauncher::state());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcStart(
+        JNIEnv* env, jobject /*thiz*/, jstring socket_path) {
+    std::string path = ToStd(env, socket_path);
+    if (path.empty()) return JNI_FALSE;
+    int rc = Ipc().Start(path, std::make_shared<LoggingIpcHandler>());
+    return rc == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcStop(
+        JNIEnv* /*env*/, jobject /*thiz*/) {
+    Ipc().Stop();
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_itzkaguya_aospcontainer_core_ContainerCore_nativeIpcBroadcast(
+        JNIEnv* env, jobject /*thiz*/, jint type, jbyteArray payload) {
+    if (payload == nullptr) {
+        return static_cast<jint>(Ipc().Broadcast(static_cast<uint16_t>(type), nullptr, 0));
+    }
+    jsize len = env->GetArrayLength(payload);
+    jbyte* bytes = env->GetByteArrayElements(payload, nullptr);
+    jint delivered = static_cast<jint>(Ipc().Broadcast(
+        static_cast<uint16_t>(type),
+        reinterpret_cast<const uint8_t*>(bytes), static_cast<uint32_t>(len)));
+    env->ReleaseByteArrayElements(payload, bytes, JNI_ABORT);
+    return delivered;
 }
 }

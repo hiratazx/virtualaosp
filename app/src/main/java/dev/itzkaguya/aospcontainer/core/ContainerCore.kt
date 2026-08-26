@@ -42,4 +42,14 @@ object ContainerCore {
 
     /** One of the STATE_* constants. */
     external fun nativeGetState(): Int
+
+    /** Start the host-side IPC endpoint at [socketPath] (inside sandbox). */
+    external fun nativeIpcStart(socketPath: String): Boolean
+
+    /** Shut the IPC endpoint down and remove its socket node. */
+    external fun nativeIpcStop()
+
+    /** Send a packet of [type] to every connected guest client.
+     * Returns the number of clients it was delivered to. */
+    external fun nativeIpcBroadcast(type: Int, payload: ByteArray?): Int
 }
