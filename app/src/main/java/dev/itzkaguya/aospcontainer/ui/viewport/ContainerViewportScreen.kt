@@ -41,7 +41,7 @@ fun ContainerViewportScreen(
 
     /* Boot the guest (test shell by default) as the viewport appears. */
     LaunchedEffect(initBinary) {
-        ContainerService.start(context, initBinary)
+        ContainerService.start(context, initPath = initBinary)
     }
 
     Column(modifier = modifier.fillMaxSize()) {

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -37,6 +38,9 @@ class ContainerService : Service() {
 
     /** Guest entrypoint for this session; defaults to full AOSP boot. */
     private var requestedInitPath: String = DEFAULT_INIT_PATH
+
+    /** Explicit sandbox directory; null uses the default instance dir. */
+    private var overrideRootfsPath: String? = null
 
     /**
      * Live container state from the native guest monitor thread,
@@ -81,6 +85,9 @@ class ContainerService : Service() {
                 intent?.getStringExtra(EXTRA_INIT_PATH)?.let {
                     requestedInitPath = it
                 }
+                intent?.getStringExtra(EXTRA_ROOTFS_PATH)?.let {
+                    overrideRootfsPath = it
+                }
                 startGuest()
             }
         }
@@ -96,7 +103,13 @@ class ContainerService : Service() {
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    /** Local binder exposing the live service to the viewport UI. */
+    inner class ContainerBinder : Binder() {
+        val service: ContainerService
+            get() = this@ContainerService
+    }
+
+    override fun onBind(intent: Intent?): IBinder = ContainerBinder()
 
     /* ---------------------------------------------------------------- */
 
@@ -106,7 +119,8 @@ class ContainerService : Service() {
             return
         }
 
-        val rootfs = File(filesDir, "rootfs/default").absolutePath
+        val rootfs = overrideRootfsPath
+            ?: File(filesDir, "rootfs/default").absolutePath
         val socketPath = File(rootfs, ".host.sock").absolutePath
 
         ContainerCore.nativeIpcStart(socketPath)
@@ -235,11 +249,17 @@ class ContainerService : Service() {
 
         /** Diagnostic/test shells can boot via e.g. /system/bin/sh. */
         const val EXTRA_INIT_PATH = "dev.itzkaguya.aospcontainer.extra.INIT_PATH"
+        const val EXTRA_ROOTFS_PATH = "dev.itzkaguya.aospcontainer.extra.ROOTFS_PATH"
 
-        fun start(context: Context, initPath: String = DEFAULT_INIT_PATH) {
+        fun start(
+            context: Context,
+            rootfsPath: String? = null,
+            initPath: String = DEFAULT_INIT_PATH,
+        ) {
             context.startForegroundService(
                 Intent(context, ContainerService::class.java)
                     .setAction(ACTION_START)
+                    .putExtra(EXTRA_ROOTFS_PATH, rootfsPath)
                     .putExtra(EXTRA_INIT_PATH, initPath),
             )
         }
