@@ -146,60 +146,71 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
         return false;
     }
 
+    /* ---- Build env + argv BEFORE fork() so the child never touches the
+     * heap.  After fork() the child sees a CoW copy of the parent address
+     * space; as long as it does no writes these pages are never copied and
+     * no allocator lock is held when execve() is called. ---- */
+    std::vector<std::string> envStrings = {
+        "LD_PRELOAD="       + config.libfakePath,
+        /* lib64/lib before system/lib64 — flattened rootfs first. */
+        "LD_LIBRARY_PATH=" + root + "/lib64:"
+                           + root + "/lib:"
+                           + root + "/system/lib64:"
+                           + root + "/system/lib:"
+                           + root + "/apex/com.android.runtime/lib64",
+        "AOSP_ROOTFS_DIR=" + root,
+        /* /bin before /system/bin — flattened rootfs first. */
+        "PATH="            + root + "/bin:" + root + "/system/bin:/system/bin",
+        /* Bionic uses ANDROID_ROOT to locate property files and runtime
+         * resources — point to the container root so it works with both
+         * flattened and nested /system layouts. */
+        "ANDROID_ROOT="    + root,
+        "ANDROID_DATA="    + root + "/data",
+        "TMPDIR="          + root + "/data/local/tmp",
+    };
+    std::vector<const char*> envp;
+    envp.reserve(envStrings.size() + 1);
+    for (const auto& s : envStrings) envp.push_back(s.c_str());
+    envp.push_back(nullptr);
+
+    /* argv[0] = linker64 path (its own identity), argv[1] = ELF to load.
+     * linker64 resolves PT_INTERP and shared libs inside the container,
+     * so the kernel never looks up the interpreter on the host root. */
+    const char* argvRaw[] = {
+        linkerPath.c_str(),
+        binaryPath.c_str(),
+        nullptr
+    };
+
     pid_t pid = fork();
     if (pid < 0) {
         mState = ContainerState::STOPPED;
+        close(logPipe[0]);
+        close(logPipe[1]);
         return false;
     }
 
     if (pid == 0) {
-        /* ---- child ---- */
+        /* ---- CHILD: only async-signal-safe syscalls below ---- */
         setpgid(0, 0);
-        chdir(root.c_str());
+        chdir(root.c_str());                    /* sets working directory */
 
-        /* Redirect stdin to /dev/null; stdout+stderr go to the log pipe. */
+        /* stdin → /dev/null; stdout+stderr → log pipe. */
         int devNull = open("/dev/null", O_RDONLY);
-        if (devNull >= 0) { dup2(devNull, STDIN_FILENO);  close(devNull); }
+        if (devNull >= 0) { dup2(devNull, STDIN_FILENO); close(devNull); }
         dup2(logPipe[1], STDOUT_FILENO);
         dup2(logPipe[1], STDERR_FILENO);
-        /* Close all inherited fds above stderr. */
+        /* Close all inherited fds above stderr (safe even if already closed). */
         for (int fd = 3; fd < 256; ++fd) close(fd);
 
-        std::vector<std::string> envStrings = {
-            "LD_PRELOAD="       + config.libfakePath,
-            /* lib64/lib before system/lib64 — flattened rootfs first. */
-            "LD_LIBRARY_PATH=" + root + "/lib64:"
-                               + root + "/lib:"
-                               + root + "/system/lib64:"
-                               + root + "/system/lib:"
-                               + root + "/apex/com.android.runtime/lib64",
-            "AOSP_ROOTFS_DIR=" + root,
-            /* /bin before /system/bin — flattened rootfs first. */
-            "PATH="            + root + "/bin:" + root + "/system/bin:/system/bin",
-            /* Bionic uses ANDROID_ROOT to locate property files and
-             * runtime resources — point to the container root itself
-             * so it works with both flattened and /system layouts. */
-            "ANDROID_ROOT="    + root,
-            "ANDROID_DATA="    + root + "/data",
-            "TMPDIR="          + root + "/data/local/tmp",
-        };
-        std::vector<char*> envp;
-        for (const auto& s : envStrings) envp.push_back(const_cast<char*>(s.c_str()));
-        envp.push_back(nullptr);
+        /* execve takes char* const*, cast is safe — we never mutate. */
+        execve(linkerPath.c_str(),
+               const_cast<char* const*>(argvRaw),
+               const_cast<char* const*>(envp.data()));
 
-        /* argv[0] = linker64 path (its own identity), argv[1] = ELF to load.
-         * linker64 resolves PT_INTERP and shared libs inside the container,
-         * so the kernel never looks up the interpreter on the host root. */
-        char* const argv[] = {
-            const_cast<char*>(linkerPath.c_str()),
-            const_cast<char*>(binaryPath.c_str()),
-            nullptr
-        };
-
-        execve(linkerPath.c_str(), argv, envp.data());
-        __android_log_print(ANDROID_LOG_ERROR, GL_TAG,
-            "execve via linker64 failed: %s (errno %d: %s)",
-            linkerPath.c_str(), errno, strerror(errno));
+        /* execve failed — write a minimal error without heap allocation. */
+        const char msg[] = "execve via linker64 failed\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
         _exit(127);
     }
 
