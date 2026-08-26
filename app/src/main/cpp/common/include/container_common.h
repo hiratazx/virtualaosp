@@ -20,6 +20,12 @@
 /* Comma separated list of extra guest-visible mount entries for /proc/mounts. */
 #define AC_ENV_MOUNTS "AC_MOUNTS"
 
+/* Colon separated host prefixes that bypass redirection entirely. */
+#define AC_ENV_EXCLUDE "AC_EXCLUDE"
+
+/* Set to "1" by the launcher to install the SECCOMP denylist filter. */
+#define AC_ENV_SECCOMP "AC_SECCOMP"
+
 /* Default relative location of instances under the app files dir. */
 #define AC_INSTANCE_DIR "rootfs"
 

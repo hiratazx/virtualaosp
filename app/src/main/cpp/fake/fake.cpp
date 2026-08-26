@@ -11,6 +11,11 @@
 #include "container_common.h"
 #include "fake_state.h"
 #include "log.h"
+#include "path_redirect.h"
+#include "seccomp_filter.h"
+
+#include <cstdlib>
+#include <cstring>
 
 extern "C" {
 
@@ -36,11 +41,20 @@ long ac_fake_gid_value(void) {
 
 __attribute__((visibility("default")))
 int ac_fake_api_version(void) {
-    return 2; /* bump on ABI-changing changes to the hook surface */
+    return 3; /* bump on ABI-changing changes to the hook surface */
 }
 
 } /* extern "C" */
 
 __attribute__((constructor)) static void ac_fake_init(void) {
     acfake::init_from_env();
+    if (!acfake::enabled()) {
+        return;
+    }
+
+    acfake::set_excluded_prefixes(getenv(AC_ENV_EXCLUDE));
+
+    if (const char* sc = getenv(AC_ENV_SECCOMP); sc != nullptr && sc[0] == '1') {
+        acfake::install_seccomp_filter();
+    }
 }
