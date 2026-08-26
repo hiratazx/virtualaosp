@@ -37,6 +37,15 @@ private:
     bool mAttached = false;
 };
 
+/*
+ * Diagnostic fallback policy: while no guest frame has ever arrived,
+ * the presenter clears the surface with an animated #1E1E24 pulse at
+ * ~30 FPS instead of leaving a black screen — proving EGL/ANativeWindow
+ * operation end to end. Enabled by default.
+ */
+void setDiagnosticFallbackEnabled(bool enabled);
+bool diagnosticFallbackEnabled();
+
 } // namespace accore
 
 #endif /* DISPLAY_RENDERER_H */

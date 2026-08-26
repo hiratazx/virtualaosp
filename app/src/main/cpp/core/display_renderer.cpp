@@ -3,9 +3,22 @@
 #include "presenter.h"
 #include "log.h"
 
+#include <atomic>
 #include <cerrno>
 
 namespace accore {
+
+namespace {
+std::atomic<bool> g_diagnostic_fallback{true};
+} // namespace
+
+void setDiagnosticFallbackEnabled(bool enabled) {
+    g_diagnostic_fallback.store(enabled, std::memory_order_relaxed);
+}
+
+bool diagnosticFallbackEnabled() {
+    return g_diagnostic_fallback.load(std::memory_order_relaxed);
+}
 
 DisplayRenderer& DisplayRenderer::getInstance() {
     static DisplayRenderer instance;
@@ -34,6 +47,9 @@ bool DisplayRenderer::attach(ANativeWindow* window) {
         return false;
     }
     mAttached = true;
+    AC_LOGI("viewport attached; %s until first guest frame",
+            diagnosticFallbackEnabled() ? "diagnostic pulse will show"
+                                        : "surface stays idle");
     return true;
 }
 
