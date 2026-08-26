@@ -35,6 +35,9 @@ class ContainerService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var guestPid = 0
 
+    /** Guest entrypoint for this session; defaults to full AOSP boot. */
+    private var requestedInitPath: String = DEFAULT_INIT_PATH
+
     /**
      * Live container state from the native guest monitor thread,
      * observable by the UI without polling the service.
@@ -74,7 +77,12 @@ class ContainerService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            else -> startGuest()
+            else -> {
+                intent?.getStringExtra(EXTRA_INIT_PATH)?.let {
+                    requestedInitPath = it
+                }
+                startGuest()
+            }
         }
 
         handler.post(heartbeat)
@@ -111,7 +119,7 @@ class ContainerService : Service() {
         val pid = ContainerCore.nativeStartContainer(
             rootfsDir = rootfs,
             nativeLibDir = applicationInfo.nativeLibraryDir,
-            initPath = "/init",
+            initPath = requestedInitPath,
             extraMounts = "",
             excludePaths = "",
             fakeUid = 0,
@@ -223,18 +231,25 @@ class ContainerService : Service() {
         private const val GRACE_MS = 2_000
         private const val KEY_MONITOR_PHANTOM_PROCS =
             "settings_enable_monitor_phantom_procs"
+        private const val DEFAULT_INIT_PATH = "/init"
+
+        /** Diagnostic/test shells can boot via e.g. /system/bin/sh. */
+        const val EXTRA_INIT_PATH = "dev.itzkaguya.aospcontainer.extra.INIT_PATH"
+
+        fun start(context: Context, initPath: String = DEFAULT_INIT_PATH) {
+            context.startForegroundService(
+                Intent(context, ContainerService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_INIT_PATH, initPath),
+            )
+        }
+
         private const val DEFAULT_WIDTH = 720
         private const val DEFAULT_HEIGHT = 1280
         private const val FRAME_SLOTS = 4
 
         const val ACTION_START = "dev.itzkaguya.aospcontainer.action.START"
         const val ACTION_STOP = "dev.itzkaguya.aospcontainer.action.STOP"
-
-        fun start(context: Context) {
-            context.startForegroundService(
-                Intent(context, ContainerService::class.java).setAction(ACTION_START),
-            )
-        }
 
         fun stop(context: Context) {
             context.startForegroundService(

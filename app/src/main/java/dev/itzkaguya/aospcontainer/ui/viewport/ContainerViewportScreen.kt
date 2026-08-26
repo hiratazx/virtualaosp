@@ -15,11 +15,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
+import dev.itzkaguya.aospcontainer.service.ContainerService
 
 /**
  * Live guest display: SurfaceView bound to the native presenter, touch
@@ -28,10 +31,29 @@ import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
  */
 @Composable
 fun ContainerViewportScreen(
+    rootfsPath: String,
+    initBinary: String = "/system/bin/sh",
+    onExitContainer: () -> Unit = {},
     aspectRatio: Float = 720f / 1280f,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+
+    /* Boot the guest (test shell by default) as the viewport appears. */
+    LaunchedEffect(initBinary) {
+        ContainerService.start(context, initBinary)
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            OutlinedButton(onClick = onExitContainer) {
+                Text("Exit to dashboard")
+            }
+        }
+
         AndroidView(
             modifier = Modifier
                 .fillMaxWidth()

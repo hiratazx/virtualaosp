@@ -32,7 +32,10 @@ import kotlinx.coroutines.withContext
  * extraction with live progress emitted by [RootFsExtractor].
  */
 @Composable
-fun InstallScreen(modifier: Modifier = Modifier) {
+fun InstallScreen(
+    modifier: Modifier = Modifier,
+    onLaunchContainer: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -40,12 +43,14 @@ fun InstallScreen(modifier: Modifier = Modifier) {
     var currentFile by remember { mutableStateOf("") }
     var percentage by remember { mutableStateOf(-1) }
     var resultMessage by remember { mutableStateOf<String?>(null) }
+    var installed by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         extracting = true
+        installed = false
         resultMessage = null
         scope.launch {
             try {
@@ -91,8 +96,17 @@ fun InstallScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodyMedium,
         )
 
-        Button(onClick = { picker.launch(arrayOf("application/x-xz", "*/*")) }) {
+        Button(
+            onClick = { picker.launch(arrayOf("application/x-xz", "*/*")) },
+            enabled = !extracting,
+        ) {
             Text(if (extracting) "Extracting…" else "Choose archive")
+        }
+
+        if (installed && onLaunchContainer != null) {
+            Button(onClick = onLaunchContainer) {
+                Text("Launch container")
+            }
         }
 
         if (extracting) {
