@@ -16,7 +16,11 @@ import android.util.Log
 import dev.itzkaguya.aospcontainer.MainActivity
 import dev.itzkaguya.aospcontainer.R
 import dev.itzkaguya.aospcontainer.core.ContainerCore
+import dev.itzkaguya.aospcontainer.core.ContainerNativeBridge
 import java.io.File
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Long-lived host-side coordinator for the guest container runtime.
@@ -31,6 +35,14 @@ class ContainerService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var guestPid = 0
 
+    /**
+     * Live container state from the native guest monitor thread,
+     * observable by the UI without polling the service.
+     */
+    private val mutableContainerState =
+        MutableStateFlow(ContainerNativeBridge.STATE_STOPPED)
+    val containerState: StateFlow<Int> get() = mutableContainerState.asStateFlow()
+
     private val heartbeat = object : Runnable {
         override fun run() {
             refreshNotification()
@@ -42,6 +54,15 @@ class ContainerService : Service() {
         super.onCreate()
         createChannel()
         mitigatePhantomProcessKiller()
+
+        ContainerNativeBridge.nativeSetLifecycleListener(
+            object : ContainerNativeBridge.LifecycleListener {
+                override fun onStateChanged(state: Int, exitCode: Int) {
+                    Log.i(TAG, "guest state=$state exitCode=$exitCode")
+                    mutableContainerState.value = state
+                }
+            },
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -63,6 +84,7 @@ class ContainerService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         stopGuest()
+        ContainerNativeBridge.nativeSetLifecycleListener(null)
         super.onDestroy()
     }
 
