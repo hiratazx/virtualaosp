@@ -1,138 +1,247 @@
 package dev.itzkaguya.aospcontainer.ui.install
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.itzkaguya.aospcontainer.core.ExtractionState
-import dev.itzkaguya.aospcontainer.core.RootFsExtractor
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.itzkaguya.aospcontainer.model.ContainerManifest
 
-/**
- * RootFS installation flow: SAF document picker -> streaming .tar.xz
- * extraction with live progress emitted by [RootFsExtractor].
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InstallScreen(
+    onLaunchContainer: () -> Unit,
     modifier: Modifier = Modifier,
-    onLaunchContainer: (() -> Unit)? = null,
+    viewModel: InstallViewModel = viewModel()
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val uiState by viewModel.uiState.collectAsState()
 
-    var extracting by remember { mutableStateOf(false) }
-    var currentFile by remember { mutableStateOf("") }
-    var percentage by remember { mutableStateOf(-1) }
-    var resultMessage by remember { mutableStateOf<String?>(null) }
-    var installed by remember { mutableStateOf(false) }
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.startInstallation(it) }
+    }
 
-    val picker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        extracting = true
-        installed = false
-        resultMessage = null
-        scope.launch {
-            try {
-                val outcome = withContext(Dispatchers.IO) {
-                    val stream = context.contentResolver.openInputStream(uri)
-                        ?: throw IllegalStateException("cannot open selected file")
-                    val collector = RootFsExtractor(context)
-                    var completed: ExtractionState.Completed? = null
-                    stream.use { input ->
-                        collector.extractRootFs(input).collect { state ->
-                            when (state) {
-                                is ExtractionState.Progress -> {
-                                    percentage = state.percentage
-                                    currentFile = state.currentFile
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("AOSP Container Engine", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+        },
+        modifier = modifier
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedContent(
+                targetState = uiState,
+                label = "RomStateTransition"
+            ) { state ->
+                when (state) {
+                    is RomUiState.NotInstalled -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderZip,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(56.dp)
+                                )
+                                Text(
+                                    text = "Install Container ROM",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Select a .tar.xz rootfs archive containing manifest.json to set up the container.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Button(
+                                    onClick = {
+                                        filePickerLauncher.launch(arrayOf("application/x-xz", "application/octet-stream", "*/*"))
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Choose Archive")
                                 }
-                                is ExtractionState.Completed -> completed = state
-                                is ExtractionState.Error -> throw state.throwable
                             }
                         }
                     }
-                    completed
+
+                    is RomUiState.Extracting -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text(
+                                    text = "Extracting & Configuring...",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                Text(
+                                    text = state.currentFile,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    is RomUiState.Ready -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = state.manifest.name,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Ready to boot",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider()
+
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    DetailRow(label = "Architecture", value = state.manifest.arch)
+                                    DetailRow(label = "Android API", value = "Android ${state.manifest.androidApi}")
+                                    DetailRow(label = "Version", value = state.manifest.version)
+                                }
+
+                                Spacer(Modifier.height(8.dp))
+
+                                // Primary Launch Action
+                                Button(
+                                    onClick = onLaunchContainer,
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Launch Container", fontWeight = FontWeight.Bold)
+                                }
+
+                                // Secondary Reinstall Action
+                                OutlinedButton(
+                                    onClick = {
+                                        filePickerLauncher.launch(arrayOf("application/x-xz", "application/octet-stream", "*/*"))
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Replace / Reinstall ROM")
+                                }
+                            }
+                        }
+                    }
+
+                    is RomUiState.Error -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text(
+                                    text = "Installation Failed",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = state.message,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Button(
+                                    onClick = { viewModel.resetToInstall() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Dismiss")
+                                }
+                            }
+                        }
+                    }
                 }
-                resultMessage = outcome?.let {
-                    "Installed '${it.manifest.name}' v${it.manifest.version} " +
-                        "(${it.manifest.arch}, API ${it.manifest.androidApi})"
-                } ?: "Extraction finished"
-            } catch (t: Throwable) {
-                resultMessage = "Install failed: ${t.message}"
-            } finally {
-                extracting = false
             }
         }
     }
+}
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text("Install container ROM", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Select a .tar.xz rootfs archive containing manifest.json",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-
-        Button(
-            onClick = { picker.launch(arrayOf("application/x-xz", "*/*")) },
-            enabled = !extracting,
-        ) {
-            Text(if (extracting) "Extracting…" else "Choose archive")
-        }
-
-        if (installed && onLaunchContainer != null) {
-            Button(onClick = onLaunchContainer) {
-                Text("Launch container")
-            }
-        }
-
-        if (extracting) {
-            if (percentage >= 0) {
-                LinearProgressIndicator(
-                    progress = { percentage / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-            if (currentFile.isNotEmpty()) {
-                Text(currentFile, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-            }
-        }
-
-        resultMessage?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (it.startsWith("Install failed")) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-            )
-        }
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
