@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -83,6 +84,15 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
         setpgid(0, 0);
         chdir(root.c_str());
 
+        /* Redirect stdin to /dev/null so the child never blocks waiting
+         * for terminal input. linker64 on some AOSP images reads fd 0
+         * during early init, which hangs if it is an open TTY. */
+        int devNull = open("/dev/null", O_RDWR);
+        if (devNull >= 0) {
+            dup2(devNull, STDIN_FILENO);
+            close(devNull);
+        }
+
         std::vector<std::string> envStrings = {
             "LD_PRELOAD="       + config.libfakePath,
             "LD_LIBRARY_PATH=" + root + "/system/lib64:"
@@ -90,8 +100,11 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
                                + root + "/apex/com.android.runtime/lib64",
             "AOSP_ROOTFS_DIR=" + root,
             "PATH="            + root + "/system/bin:" + root + "/bin",
-            "ANDROID_ROOT=/system",
-            "ANDROID_DATA=/data",
+            /* Bionic uses ANDROID_ROOT to locate property files and
+             * runtime resources — must point inside the container. */
+            "ANDROID_ROOT="    + root + "/system",
+            "ANDROID_DATA="    + root + "/data",
+            "TMPDIR="          + root + "/data/local/tmp",
         };
         std::vector<char*> envp;
         for (const auto& s : envStrings) envp.push_back(const_cast<char*>(s.c_str()));
@@ -108,7 +121,8 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
 
         execve(linkerPath.c_str(), argv, envp.data());
         __android_log_print(ANDROID_LOG_ERROR, GL_TAG,
-            "execve via linker64 failed: %s — %s", linkerPath.c_str(), strerror(errno));
+            "execve via linker64 failed: %s (errno %d: %s)",
+            linkerPath.c_str(), errno, strerror(errno));
         _exit(127);
     }
 

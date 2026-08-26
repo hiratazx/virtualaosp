@@ -369,9 +369,17 @@ void DisplayRenderer::renderLoop() {
                 glBindTexture(GL_TEXTURE_2D, mTextureId);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             } else {
-                /* Diagnostic standby: dark background while waiting for
-                 * the first guest frame. */
-                glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
+                /* Diagnostic pulse: sinusoidal brightness sweep (#0A0A14 to
+                 * #1E1E30, period ~2s) so the viewport is clearly alive while
+                 * waiting for the first guest frame. */
+                auto now = std::chrono::steady_clock::now();
+                double t = std::chrono::duration<double>(
+                    now.time_since_epoch()).count();
+                float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(t * 3.14159));
+                float r = 0.039f + pulse * 0.078f;
+                float g = 0.039f + pulse * 0.078f;
+                float b = 0.078f + pulse * 0.118f;
+                glClearColor(r, g, b, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
             }
 
