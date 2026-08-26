@@ -1,0 +1,94 @@
+name: android-ci
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+
+env:
+  NDK_VERSION: 26.3.11579264 # r26c
+  CMAKE_VERSION: 3.22.1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required for softprops/action-gh-release on tag builds
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK r26c and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # The repo has no committed wrapper; provide a managed Gradle.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # AGP only honors an explicitly configured ndkVersion; pin r26c via
+      # an init script so libfake.so / libcontainer_core.so compile with
+      # the NDK installed above instead of AGP's default download.
+      - name: Pin NDK version for AGP
+        run: |
+          cat > "$HOME/pin-ndk.gradle" <<'EOF'
+          allprojects {
+              afterEvaluate {
+                  if (project.hasProperty('android')) {
+                      project.android.ndkVersion = System.getenv('NDK_VERSION')
+                  }
+              }
+          }
+          EOF
+
+      - name: Assemble debug APK (push/PR)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: gradle -I "$HOME/pin-ndk.gradle" assembleDebug --stacktrace
+
+      - name: Upload debug APK artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aospcontainer-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Build release APK and AAB (tag)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: gradle -I "$HOME/pin-ndk.gradle" assembleRelease bundleRelease --stacktrace
+
+      # No signing config is wired yet, so assets are published unsigned
+      # and named accordingly.
+      - name: Stage release assets (tag)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*-unsigned.apk \
+            "dist/AOSPContainer-${GITHUB_REF_NAME#v}-release-unsigned.apk"
+          cp app/build/outputs/bundle/release/*.aab \
+            "dist/AOSPContainer-${GITHUB_REF_NAME#v}-release.aab"
+          ls -la dist
+
+      - name: Publish to GitHub Releases (tag)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
