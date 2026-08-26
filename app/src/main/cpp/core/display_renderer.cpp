@@ -95,14 +95,18 @@ void DisplayRenderer::ensurePumpStarted() {
 void DisplayRenderer::updateGuestFrame(const uint8_t* rgbaBuffer, int width, int height) {
     {
         std::unique_lock<std::mutex> lock(mFrameMutex);
-        mGuestFrameWidth = width;
+        mGuestFrameWidth  = width;
         mGuestFrameHeight = height;
-        size_t size = static_cast<size_t>(width * height * 4);
-        mFrameBuffer.assign(rgbaBuffer, rgbaBuffer + size);
+        const size_t bufferSize = static_cast<size_t>(width * height * 4);
+        if (mFrameBuffer.size() != bufferSize) {
+            mFrameBuffer.resize(bufferSize);
+        }
+        std::memcpy(mFrameBuffer.data(), rgbaBuffer, bufferSize);
+        mHasNewFrame = true;
     }
-    mHasNewFrame = true;
     mCondition.notify_one();
 }
+
 
 /* Bridge between the memfd seqlock channel (guest transport, unchanged)
  * and the EGL renderer's texture upload path. */

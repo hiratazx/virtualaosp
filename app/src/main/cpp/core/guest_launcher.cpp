@@ -7,7 +7,6 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <thread>
@@ -23,60 +22,36 @@ static std::atomic<bool>  g_pumpRunning{false};
 static std::thread        g_framePumpThread;
 
 /**
- * Generate and push RGBA test frames directly into DisplayRenderer at
- * ~60 fps. Runs while the real guest compositor is still initialising so
- * the EGL/GL/Surface pipeline can be verified end-to-end immediately.
- *
- * frameFd: memfd shared with the guest (mmap'd to keep the fd alive).
- * If frameFd < 0, the pump still runs but skips the mmap.
+ * Push animated RGBA test frames directly into DisplayRenderer at ~60 fps.
+ * Bypasses the shared-memory channel so the EGL/GL/Surface pipeline is
+ * exercised immediately, before the guest compositor outputs real frames.
  */
-static void startSoftwareFramePump(int frameFd, int width, int height, int slotCount) {
+static void startSoftwareFramePump(int width, int height) {
+    if (g_pumpRunning.load(std::memory_order_relaxed)) return;
     g_pumpRunning.store(true, std::memory_order_relaxed);
 
-    const size_t slotSize  = static_cast<size_t>(width * height * 4);
-    const size_t totalSize = slotSize * static_cast<size_t>(slotCount);
-
-    /* Map the shared frame channel fd if available so it stays valid for
-     * the guest process.  We don't write through it here — updateGuestFrame
-     * feeds the renderer directly — but holding a mapping prevents premature
-     * fd cleanup. */
-    void* shm = MAP_FAILED;
-    if (frameFd >= 0 && totalSize > 0) {
-        shm = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_SHARED, frameFd, 0);
-        if (shm == MAP_FAILED) {
-            GL_LOGE("mmap frameFd failed: %s (continuing without shm)", strerror(errno));
-        }
-    }
-
-    g_framePumpThread = std::thread(
-        [shm, totalSize, width, height, slotSize]() {
-
-        std::vector<uint8_t> pixelBuf(slotSize);
-        uint32_t tick = 0;
+    g_framePumpThread = std::thread([width, height]() {
+        GL_LOGI("software frame feeder started at %dx%d", width, height);
+        const size_t bufSize = static_cast<size_t>(width * height * 4);
+        std::vector<uint8_t> buffer(bufSize, 255);
+        uint32_t frameCount = 0;
 
         while (g_pumpRunning.load(std::memory_order_relaxed)) {
-            uint8_t* buf = pixelBuf.data();
-
+            frameCount++;
             for (int y = 0; y < height; ++y) {
                 for (int x = 0; x < width; ++x) {
                     size_t idx = static_cast<size_t>(y * width + x) * 4;
-                    buf[idx + 0] = static_cast<uint8_t>((x + tick)       % 256);
-                    buf[idx + 1] = static_cast<uint8_t>((y + tick * 2)   % 256);
-                    buf[idx + 2] = static_cast<uint8_t>(
-                        128 + 127 * std::sin((x + y + tick) * 0.05f));
-                    buf[idx + 3] = 255;
+                    buffer[idx + 0] = static_cast<uint8_t>((x + frameCount * 2) % 256);
+                    buffer[idx + 1] = static_cast<uint8_t>((y + frameCount)     % 256);
+                    buffer[idx + 2] = static_cast<uint8_t>((x + y + frameCount) % 256);
+                    buffer[idx + 3] = 255;
                 }
             }
-
-            accore::DisplayRenderer::getInstance().updateGuestFrame(buf, width, height);
-
-            tick += 2;
+            accore::DisplayRenderer::getInstance().updateGuestFrame(
+                buffer.data(), width, height);
             std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 fps
         }
-
-        if (shm != MAP_FAILED && totalSize > 0) {
-            munmap(shm, totalSize);
-        }
+        GL_LOGI("software frame feeder stopped");
     });
 
     GL_LOGI("software frame pump started (%dx%d)", width, height);
@@ -215,13 +190,7 @@ bool GuestLauncher::startContainer(const LaunchConfig& config) {
 
     /* Start the software frame pump so the EGL/GL pipeline is exercised
      * immediately, before the guest compositor outputs real frames. */
-    if (config.frameFd >= 0) {
-        startSoftwareFramePump(
-            config.frameFd, config.frameWidth, config.frameHeight, config.frameSlots);
-    } else {
-        /* No frameFd — pump without shm (still pushes test frames). */
-        startSoftwareFramePump(-1, config.frameWidth, config.frameHeight, config.frameSlots);
-    }
+    startSoftwareFramePump(config.frameWidth, config.frameHeight);
 
     return true;
 }
