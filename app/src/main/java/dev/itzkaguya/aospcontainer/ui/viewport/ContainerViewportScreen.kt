@@ -219,7 +219,7 @@ fun ContainerViewportScreen(
                 },
                 title = {
                     Text(
-                        text = "Guest OS Power",
+                        text = "Guest OS Power Management",
                         style = MaterialTheme.typography.titleLarge,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
@@ -227,7 +227,9 @@ fun ContainerViewportScreen(
                 },
                 text = {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -238,7 +240,7 @@ fun ContainerViewportScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         // Restart Container Button
                         FilledTonalButton(
@@ -259,7 +261,7 @@ fun ContainerViewportScreen(
                             Icon(
                                 Icons.Default.Refresh,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("Restart Container")
@@ -285,7 +287,7 @@ fun ContainerViewportScreen(
                             Icon(
                                 Icons.Default.PowerSettingsNew,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("Shutdown & Quit", fontWeight = FontWeight.Bold)

@@ -74,14 +74,16 @@ void DisplayRenderer::updateWindowSize(int width, int height) {
 }
 
 void DisplayRenderer::destroyWindow() {
-    {
-        std::unique_lock<std::mutex> lock(mWindowMutex);
-        if (mWindow != nullptr) {
-            ANativeWindow_release(mWindow);
-            mWindow = nullptr;
-        }
+    std::unique_lock<std::mutex> lock(mWindowMutex);
+    /* Terminate EGL immediately so the BufferQueue is released before
+     * the Surface object is invalidated on the Kotlin side. This prevents
+     * the "Abandoned BufferQueue" spam in eglSwapBuffers. */
+    terminateEGL();
+    if (mWindow != nullptr) {
+        ANativeWindow_release(mWindow);
+        mWindow = nullptr;
     }
-    mCondition.notify_one();
+    mCondition.notify_all();
 }
 
 void DisplayRenderer::ensurePumpStarted() {
@@ -383,7 +385,21 @@ void DisplayRenderer::renderLoop() {
                 glClear(GL_COLOR_BUFFER_BIT);
             }
 
-            eglSwapBuffers(mEglDisplay, mEglSurface);
+            if (!eglSwapBuffers(mEglDisplay, mEglSurface)) {
+                EGLint err = eglGetError();
+                if (err == EGL_BAD_SURFACE || err == EGL_BAD_NATIVE_WINDOW) {
+                    /* Surface was abandoned (e.g. SurfaceHolder destroyed).
+                     * Clean up EGL so we stop spamming logcat and wait for
+                     * a new window to be provided. */
+                    LOGE("eglSwapBuffers: surface lost (0x%x) — stopping render", err);
+                    terminateEGL();
+                    eglReady = false;
+                    std::unique_lock<std::mutex> lock(mWindowMutex);
+                    mCondition.wait(lock, [this]() { return !mRunning || mWindow != nullptr; });
+                } else {
+                    LOGE("eglSwapBuffers error 0x%x", err);
+                }
+            }
 
             if (!hasData) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(33));
