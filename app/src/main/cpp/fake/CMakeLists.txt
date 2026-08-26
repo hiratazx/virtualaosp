@@ -1,6 +1,7 @@
 add_library(fake SHARED
     fake.cpp
     fake_state.cpp
+    path_redirect.cpp
 )
 
 target_link_libraries(fake PRIVATE
