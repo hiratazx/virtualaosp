@@ -17,19 +17,20 @@
 #include <memory>
 #include <string>
 
+#include "ac_ipc_protocol.h"
+
 namespace accore {
 
-constexpr uint32_t kIpcMagic = 0x41434950u; /* "ACIP" */
-constexpr uint16_t kIpcVersion = 1;
+constexpr uint32_t kIpcMagic = AC_IPC_MAGIC;
+constexpr uint16_t kIpcVersion = AC_IPC_VERSION;
 
-/* Packet types (extensible; input/frame types added in later phases). */
-enum IpcType : uint16_t {
-    kIpcPing = 0x01,
-    kIpcPong = 0x02,
-    kIpcState = 0x03,
-    kIpcGuestReady = 0x04,
-    kIpcShutdown = 0x05,
-};
+/* Packet types come from the shared wire contract. */
+constexpr uint16_t kIpcPing = AC_IPC_PING;
+constexpr uint16_t kIpcPong = AC_IPC_PONG;
+constexpr uint16_t kIpcState = AC_IPC_STATE;
+constexpr uint16_t kIpcGuestReady = AC_IPC_GUEST_READY;
+constexpr uint16_t kIpcShutdown = AC_IPC_SHUTDOWN;
+constexpr uint16_t kIpcInputTouch = AC_IPC_INPUT_TOUCH;
 
 class IpcMessageHandler {
 public:
