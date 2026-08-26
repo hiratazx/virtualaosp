@@ -6,7 +6,7 @@
 #ifndef FAKE_STATE_H
 #define FAKE_STATE_H
 
-#include <cstddef>
+#include <stddef.h>
 
 namespace acfake {
 

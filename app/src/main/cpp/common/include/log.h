@@ -1,13 +1,12 @@
 #ifndef AC_LOG_H
 #define AC_LOG_H
 
-#include <android/log.h>
-
 #ifdef __ANDROID__
+#include <android/log.h>
 #define AC_LOG_PRINT(prio, tag, fmt, ...) __android_log_print(prio, tag, fmt, ##__VA_ARGS__)
 #else
 /* Host builds (unit tests): route to stderr. */
-#include <cstdio>
+#include <stdio.h>
 #define AC_LOG_PRINT(prio, tag, fmt, ...) \
     fprintf(stderr, "[%s] %s: " fmt "\n", tag, #prio, ##__VA_ARGS__)
 #endif

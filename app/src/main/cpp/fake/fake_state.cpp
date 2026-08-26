@@ -2,8 +2,8 @@
 #include "container_common.h"
 #include "log.h"
 
-#include <cstdlib>
-#include <cstring>
+#include <stdlib.h>
+#include <string.h>
 
 namespace acfake {
 
